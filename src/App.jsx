@@ -692,6 +692,14 @@ function App() {
   const customerShopLabel = selectedBakery?.name || customerShopOptions.find((location) => location.id === customerShopId)?.name || customerShopId
   const selectedBakeryCapability = selectedBakery?.capability || { presetsOnly: false, presetsCustomizable: false, fullCustom: true }
   const selectedBakeryPresets = fakeBakeryPresets[customerShopId] || []
+  const totalPrice = useMemo(() => {
+    const typePrice = cakeTypes.find((type) => type.id === cakeType)?.basePrice || 0
+    const layerPrice = layers.reduce((sum, layer) => {
+      return sum + lookupPrice('bread', layer.bread) + lookupPrice('sugar', layer.sugar) + lookupPrice('cream', layer.cream) + lookupPrice('flavor', layer.flavor)
+    }, 0)
+    return typePrice + layerCount * 8 + layerPrice
+  }, [cakeType, layerCount, layers])
+
   const selectedBakeryMenuItems = [
     ...selectedBakeryPresets.map((preset, index) => ({
       ...preset,
@@ -709,14 +717,6 @@ function App() {
       image: 'Custom design preview',
     }] : []),
   ]
-
-  const totalPrice = useMemo(() => {
-    const typePrice = cakeTypes.find((type) => type.id === cakeType)?.basePrice || 0
-    const layerPrice = layers.reduce((sum, layer) => {
-      return sum + lookupPrice('bread', layer.bread) + lookupPrice('sugar', layer.sugar) + lookupPrice('cream', layer.cream) + lookupPrice('flavor', layer.flavor)
-    }, 0)
-    return typePrice + layerCount * 8 + layerPrice
-  }, [cakeType, layerCount, layers])
 
   const activeAccountSession = accountSessions[accountType]
   const sessionEntries = useMemo(() => ([
