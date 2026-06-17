@@ -2748,30 +2748,21 @@ function App() {
 
             <div className="profile-menu-group list-card">
               <button type="button" className={profileSection === 'profile' ? 'profile-menu-row active' : 'profile-menu-row'} onClick={() => setProfileSection('profile')}>
-                <span>Name</span>
-                <strong>{customerProfile.fullName || 'Add after sign-in'}</strong>
-              </button>
-              <button type="button" className={profileSection === 'email' ? 'profile-menu-row active' : 'profile-menu-row'} onClick={() => setProfileSection('email')}>
-                <span>Email</span>
-                <strong>{customerProfile.email || 'Not connected yet'}</strong>
+                <span>Profile</span>
+                <strong>Name, email, bakery</strong>
               </button>
               <button type="button" className={profileSection === 'orders' ? 'profile-menu-row active' : 'profile-menu-row'} onClick={() => setProfileSection('orders')}>
                 <span>Orders</span>
-                <strong>{customerOrders.length ? `${customerOrders.length} total` : 'Open one by one'}</strong>
+                <strong>Current cart and past orders</strong>
               </button>
               <button type="button" className={profileSection === 'saved' ? 'profile-menu-row active' : 'profile-menu-row'} onClick={() => setProfileSection('saved')}>
                 <span>Saved Cakes</span>
-                <strong>{savedDesigns.length ? `${savedDesigns.length} saved` : 'Favorites and reorders'}</strong>
+                <strong>Favorites and reorders</strong>
               </button>
+            </div>
+
+            <div className="profile-menu-group list-card">
               <button type="button" className={profileSection === 'settings' ? 'profile-menu-row active' : 'profile-menu-row'} onClick={() => setProfileSection('settings')}>
-                <span>Addresses</span>
-                <strong>{customerProfile.addresses.length ? `${customerProfile.addresses.length} saved` : 'Add your first one'}</strong>
-              </button>
-              <button type="button" className={profileSection === 'security' ? 'profile-menu-row active' : 'profile-menu-row'} onClick={() => setProfileSection('security')}>
-                <span>Payments</span>
-                <strong>{customerProfile.cards.length ? `${customerProfile.cards.length} saved` : 'Add your first card'}</strong>
-              </button>
-              <button type="button" className={profileSection === 'preferences' ? 'profile-menu-row active' : 'profile-menu-row'} onClick={() => setProfileSection('preferences')}>
                 <span>Settings</span>
                 <strong>Notifications and preferences</strong>
               </button>
@@ -2779,38 +2770,44 @@ function App() {
                 <span>Help</span>
                 <strong>Support, pickup, refunds</strong>
               </button>
+              <button type="button" className={profileSection === 'security' ? 'profile-menu-row active' : 'profile-menu-row'} onClick={() => setProfileSection('security')}>
+                <span>Logout</span>
+                <strong>Session and account access</strong>
+              </button>
             </div>
 
             <div className="list-card profile-detail-card">
               {profileSection === 'profile' && <>
                 <div className="editor-head">
                   <div>
-                    <span className="label">Name</span>
-                    <strong>Customer name</strong>
+                    <span className="label">Profile</span>
+                    <strong>{accountSessions.customer?.name || customerProfile.fullName || 'Customer account'}</strong>
                   </div>
-                  <span className="mini-note">Profile</span>
+                  <span className="mini-note">Customer</span>
                 </div>
-                <div className="list-row"><span>Full name</span><strong>{customerProfile.fullName || 'Add after sign-in'}</strong></div>
-                <div className="list-row"><span>Account type</span><strong>Customer</strong></div>
-                <div className="list-row"><span>Preferred bakery</span><strong>{customerShopLabel}</strong></div>
-              </>}
-
-              {profileSection === 'email' && <>
-                <div className="editor-head">
-                  <div>
-                    <span className="label">Email</span>
-                    <strong>Login email</strong>
-                  </div>
-                  <span className="mini-note">Account</span>
-                </div>
+                <div className="list-row"><span>Name</span><strong>{customerProfile.fullName || 'Add after sign-in'}</strong></div>
                 <div className="list-row"><span>Email</span><strong>{customerProfile.email || 'Not connected yet'}</strong></div>
-                <div className="list-row"><span>Status</span><strong>{authTokens.customer ? 'Connected' : 'Needs reconnect'}</strong></div>
-                <div className="pill-row">
-                  {authTokens.customer ? (
-                    <button type="button" className="pill active" onClick={handleCustomerLogout} disabled={uiState.authUpdating}>{uiState.authUpdating ? 'Logging out...' : 'Logout'}</button>
-                  ) : (
-                    <button type="button" className="pill active" onClick={() => toggleDemoSession('customer')} disabled={uiState.authUpdating}>{uiState.authUpdating ? 'Reconnecting...' : 'Reconnect'}</button>
-                  )}
+                <div className="list-row"><span>Addresses</span><strong>{customerProfile.addresses.length}</strong></div>
+                <div className="list-row"><span>Payments</span><strong>{customerProfile.cards.length}</strong></div>
+                <div className="list-row"><span>Preferred bakery</span><strong>{customerShopLabel}</strong></div>
+                <div className="list-row"><span>Saved cakes</span><strong>{savedDesigns.length}</strong></div>
+                <div className="profile-summary-grid">
+                  <button type="button" className="profile-menu-row compact active" onClick={() => setProfileSection('orders')}>
+                    <span>Past orders</span>
+                    <strong>{customerOrders.length || 'Open'}</strong>
+                  </button>
+                  <button type="button" className="profile-menu-row compact" onClick={() => setProfileSection('saved')}>
+                    <span>Saved cakes</span>
+                    <strong>{savedDesigns.length || 'None'}</strong>
+                  </button>
+                  <button type="button" className="profile-menu-row compact" onClick={() => setProfileSection('settings')}>
+                    <span>Addresses</span>
+                    <strong>{customerProfile.addresses.length || 'Add'}</strong>
+                  </button>
+                  <button type="button" className="profile-menu-row compact" onClick={() => setProfileSection('security')}>
+                    <span>Payments</span>
+                    <strong>{customerProfile.cards.length || 'Add'}</strong>
+                  </button>
                 </div>
               </>}
 
@@ -2892,19 +2889,6 @@ function App() {
                 </div>
               </>}
 
-              {profileSection === 'preferences' && <>
-                <div className="editor-head">
-                  <div>
-                    <span className="label">Settings</span>
-                    <strong>Customer preferences</strong>
-                  </div>
-                  <span className="mini-note">Simple</span>
-                </div>
-                <div className="list-row"><span>Notifications</span><strong>Order updates and promos</strong></div>
-                <div className="list-row"><span>Fulfillment preferences</span><strong>{fulfillmentType === 'delivery' ? 'Delivery-first checkout' : 'Pickup-first checkout'}</strong></div>
-                <div className="list-row"><span>Accessibility</span><strong>Readable text and comfort</strong></div>
-              </>}
-
               {profileSection === 'help' && <>
                 <div className="editor-head">
                   <div>
@@ -2922,10 +2906,12 @@ function App() {
                 <div className="editor-head">
                   <div>
                     <span className="label">Payments</span>
-                    <strong>Saved cards</strong>
+                    <strong>Cards and account access</strong>
                   </div>
-                  <span className="mini-note">Checkout</span>
+                  <span className="mini-note">Session</span>
                 </div>
+                <div className="list-row"><span>Status</span><strong>{authTokens.customer ? 'Connected' : 'Needs reconnect'}</strong></div>
+                <div className="list-row"><span>Device</span><strong>{sessionMeta.customer?.deviceLabel || 'This browser'}</strong></div>
                 <div className="list-row"><span>Saved cards</span><strong>{customerProfile.cards.length}</strong></div>
                 {customerProfile.cards.map((card) => (
                   <button key={card.id} type="button" className="profile-saved-row" onClick={() => setPaymentCard({ brand: card.brand, last4: card.last4, name: card.name })}>
@@ -2954,6 +2940,13 @@ function App() {
                     <input type="text" value={cardDraft.name} onChange={(event) => setCardDraft((current) => ({ ...current, name: event.target.value }))} placeholder="Full name" />
                   </label>
                   <button type="button" className="pill active" onClick={addProfileCard} disabled={uiState.updating || !cardDraft.name.trim() || cardDraft.last4.length !== 4}>Save card</button>
+                </div>
+                <div className="pill-row">
+                  {authTokens.customer ? (
+                    <button type="button" className="pill active" onClick={handleCustomerLogout} disabled={uiState.authUpdating}>{uiState.authUpdating ? 'Logging out...' : 'Logout'}</button>
+                  ) : (
+                    <button type="button" className="pill active" onClick={() => toggleDemoSession('customer')} disabled={uiState.authUpdating}>{uiState.authUpdating ? 'Reconnecting...' : 'Reconnect'}</button>
+                  )}
                 </div>
               </>}
             </div>
