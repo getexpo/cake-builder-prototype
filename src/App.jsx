@@ -639,7 +639,7 @@ function App() {
   const [ownerTemplates, setOwnerTemplates] = useState([])
   const [ownerTemplateDraft, setOwnerTemplateDraft] = useState({ id: '', name: '', occasion: '', defaultMode: 'simple', maxLayers: 1, allowedCakeTypes: [] })
   const [uiState, setUiState] = useState({ loading: true, error: '', message: '', saving: false, submitting: false, updating: false, reorderingId: '', authUpdating: false, apiBaseUrl: '' })
-  const googleAuthEnabled = false
+  const googleAuthEnabled = true
   const backendRequiredForActions = HAS_REMOTE_API || typeof window === 'undefined' || window.location.hostname === 'localhost'
   const customerVisibleError = view === 'builder' || view === 'home' ? '' : uiState.error
   const ownerOrderIdRef = useRef('')
