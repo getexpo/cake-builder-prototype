@@ -582,21 +582,16 @@ function App() {
   const [pickupSlotId, setPickupSlotId] = useState('')
   const [checkoutStage, setCheckoutStage] = useState('summary')
   const [fulfillmentType, setFulfillmentType] = useState('pickup')
-  const [paymentCard, setPaymentCard] = useState({ name: 'Emma Johnson', last4: '4242', brand: 'Visa' })
+  const [paymentCard, setPaymentCard] = useState({ name: '', last4: '', brand: 'Visa' })
   const [addressDraft, setAddressDraft] = useState({ label: '', line1: '', instructions: '' })
-  const [cardDraft, setCardDraft] = useState({ brand: 'Visa', last4: '', name: 'Emma Johnson' })
+  const [cardDraft, setCardDraft] = useState({ brand: 'Visa', last4: '', name: '' })
   const [customerProfile, setCustomerProfile] = useState({
-    fullName: 'Emma Johnson',
-    email: DEMO_USERS.customer.email,
-    addresses: [
-      { id: 'addr-home', label: 'Home', line1: '1234 Main St, Vancouver, BC' },
-      { id: 'addr-work', label: 'Work', line1: '880 West Pender St, Vancouver, BC' },
-    ],
-    cards: [
-      { id: 'card-1', brand: 'Visa', last4: '4242', name: 'Emma Johnson' },
-    ],
+    fullName: '',
+    email: '',
+    addresses: [],
+    cards: [],
   })
-  const [selectedAddressId, setSelectedAddressId] = useState('addr-home')
+  const [selectedAddressId, setSelectedAddressId] = useState('')
   const [latestPlacedOrder, setLatestPlacedOrder] = useState(null)
   const [customerShopId, setCustomerShopId] = useState(DEFAULT_SHOP_ID)
   const [accountType, setAccountType] = useState('customer')
@@ -2636,7 +2631,7 @@ function App() {
               <>
                 <div className="uber-cart-title-block">
                   <h2>Payment</h2>
-                  <p>Login first, then add a saved card like Uber.</p>
+                  <p>Add your address and payment details before placing the order.</p>
                 </div>
 
                 <div className="checkout-payment-card">
@@ -2645,22 +2640,29 @@ function App() {
                     <span>{paymentCard.brand}</span>
                   </div>
                   <div className="checkout-profile-mini-card">
-                    <strong>{customerProfile.fullName}</strong>
-                    <span>{customerProfile.email}</span>
+                    <strong>{customerProfile.fullName || 'Guest checkout'}</strong>
+                    <span>{customerProfile.email || 'Add your account email after sign-in'}</span>
                   </div>
-                  <label className="checkout-input-row">
-                    <span>Delivery / saved address</span>
-                    <select value={selectedAddressId} onChange={(event) => setSelectedAddressId(event.target.value)}>
-                      {customerProfile.addresses.map((address) => <option key={address.id} value={address.id}>{address.label} · {address.line1}</option>)}
-                    </select>
-                  </label>
+                  {!!customerProfile.addresses.length ? (
+                    <label className="checkout-input-row">
+                      <span>Saved address</span>
+                      <select value={selectedAddressId} onChange={(event) => setSelectedAddressId(event.target.value)}>
+                        {customerProfile.addresses.map((address) => <option key={address.id} value={address.id}>{address.label} · {address.line1}</option>)}
+                      </select>
+                    </label>
+                  ) : (
+                    <label className="checkout-input-row">
+                      <span>Delivery / pickup address</span>
+                      <input type="text" value={addressDraft.line1} onChange={(event) => setAddressDraft((current) => ({ ...current, line1: event.target.value }))} placeholder="1234 Main St, Vancouver, BC" />
+                    </label>
+                  )}
                   <label className="checkout-input-row">
                     <span>Name on card</span>
-                    <input type="text" value={paymentCard.name} onChange={(event) => setPaymentCard((current) => ({ ...current, name: event.target.value }))} />
+                    <input type="text" value={paymentCard.name} onChange={(event) => setPaymentCard((current) => ({ ...current, name: event.target.value }))} placeholder="Full name" />
                   </label>
                   <label className="checkout-input-row">
                     <span>Card ending in</span>
-                    <input type="text" value={paymentCard.last4} maxLength={4} onChange={(event) => setPaymentCard((current) => ({ ...current, last4: event.target.value.replace(/\D/g, '').slice(0, 4) }))} />
+                    <input type="text" value={paymentCard.last4} maxLength={4} onChange={(event) => setPaymentCard((current) => ({ ...current, last4: event.target.value.replace(/\D/g, '').slice(0, 4) }))} placeholder="1234" />
                   </label>
                   {!!customerProfile.cards.length && (
                     <div className="saved-cards-stack">
@@ -2679,7 +2681,7 @@ function App() {
 
                 <div className="uber-cart-footer dual-action-footer">
                   <button type="button" className="cta secondary" onClick={() => setCheckoutStage('summary')}>Back</button>
-                  <button type="button" className="uber-checkout-btn" onClick={submitCartOrder} disabled={!checkoutReady || uiState.submitting || !paymentCard.name.trim() || paymentCard.last4.length !== 4}>{uiState.submitting ? 'Submitting...' : `Pay $${checkoutTotal.toFixed(2)}`}</button>
+                  <button type="button" className="uber-checkout-btn" onClick={submitCartOrder} disabled={!checkoutReady || uiState.submitting || !(selectedAddressId || addressDraft.line1.trim()) || !paymentCard.name.trim() || paymentCard.last4.length !== 4}>{uiState.submitting ? 'Submitting...' : `Pay $${checkoutTotal.toFixed(2)}`}</button>
                 </div>
               </>
             )}
@@ -2779,81 +2781,33 @@ function App() {
                 <div className="editor-head">
                   <div>
                     <span className="label">Profile</span>
-                    <strong>{accountSessions.customer?.name || DEFAULT_CUSTOMER_NAME}</strong>
+                    <strong>{accountSessions.customer?.name || customerProfile.fullName || 'Customer account'}</strong>
                   </div>
                   <span className="mini-note">Customer</span>
                 </div>
-                <div className="list-row"><span>Name</span><strong>{customerProfile.fullName}</strong></div>
-                <div className="list-row"><span>Email</span><strong>{customerProfile.email}</strong></div>
+                <div className="list-row"><span>Name</span><strong>{customerProfile.fullName || 'Add after sign-in'}</strong></div>
+                <div className="list-row"><span>Email</span><strong>{customerProfile.email || 'Not connected yet'}</strong></div>
                 <div className="list-row"><span>Addresses</span><strong>{customerProfile.addresses.length}</strong></div>
-                <div className="list-row"><span>Saved cards</span><strong>{customerProfile.cards.length}</strong></div>
+                <div className="list-row"><span>Payments</span><strong>{customerProfile.cards.length}</strong></div>
                 <div className="list-row"><span>Preferred bakery</span><strong>{customerShopLabel}</strong></div>
                 <div className="list-row"><span>Saved cakes</span><strong>{savedDesigns.length}</strong></div>
-
-                <div className="profile-stack-block">
-                  <div className="section-head-simple">
-                    <strong>Saved addresses</strong>
-                    <span>{customerProfile.addresses.length ? 'Ready for delivery' : 'Add your first address'}</span>
-                  </div>
-                  {customerProfile.addresses.map((address) => (
-                    <button key={address.id} type="button" className={selectedAddressId === address.id ? 'profile-saved-row active' : 'profile-saved-row'} onClick={() => setSelectedAddressId(address.id)}>
-                      <div>
-                        <strong>{address.label}</strong>
-                        <span>{address.line1}</span>
-                      </div>
-                      <em>{selectedAddressId === address.id ? 'Selected' : 'Use'}</em>
-                    </button>
-                  ))}
-                  <div className="profile-form-grid">
-                    <label className="checkout-input-row">
-                      <span>Label</span>
-                      <input type="text" value={addressDraft.label} onChange={(event) => setAddressDraft((current) => ({ ...current, label: event.target.value }))} placeholder="Home, Work, Mom's place" />
-                    </label>
-                    <label className="checkout-input-row">
-                      <span>Address</span>
-                      <input type="text" value={addressDraft.line1} onChange={(event) => setAddressDraft((current) => ({ ...current, line1: event.target.value }))} placeholder="1234 Main St, Vancouver, BC" />
-                    </label>
-                    <label className="checkout-input-row">
-                      <span>Delivery notes</span>
-                      <input type="text" value={addressDraft.instructions} onChange={(event) => setAddressDraft((current) => ({ ...current, instructions: event.target.value }))} placeholder="Buzz 204, leave at concierge" />
-                    </label>
-                    <button type="button" className="pill active" onClick={addProfileAddress} disabled={uiState.updating || !addressDraft.label.trim() || !addressDraft.line1.trim()}>Save address</button>
-                  </div>
-                </div>
-
-                <div className="profile-stack-block">
-                  <div className="section-head-simple">
-                    <strong>Saved cards</strong>
-                    <span>{customerProfile.cards.length ? 'Fast checkout ready' : 'Add your first card'}</span>
-                  </div>
-                  {customerProfile.cards.map((card) => (
-                    <button key={card.id} type="button" className="profile-saved-row" onClick={() => setPaymentCard({ brand: card.brand, last4: card.last4, name: card.name })}>
-                      <div>
-                        <strong>{card.brand} •••• {card.last4}</strong>
-                        <span>{card.name}</span>
-                      </div>
-                      <em>Use</em>
-                    </button>
-                  ))}
-                  <div className="profile-form-grid compact">
-                    <label className="checkout-input-row">
-                      <span>Brand</span>
-                      <select value={cardDraft.brand} onChange={(event) => setCardDraft((current) => ({ ...current, brand: event.target.value }))}>
-                        <option value="Visa">Visa</option>
-                        <option value="Mastercard">Mastercard</option>
-                        <option value="Amex">Amex</option>
-                      </select>
-                    </label>
-                    <label className="checkout-input-row">
-                      <span>Last 4</span>
-                      <input type="text" value={cardDraft.last4} maxLength={4} onChange={(event) => setCardDraft((current) => ({ ...current, last4: event.target.value.replace(/\D/g, '').slice(0, 4) }))} placeholder="4242" />
-                    </label>
-                    <label className="checkout-input-row">
-                      <span>Name on card</span>
-                      <input type="text" value={cardDraft.name} onChange={(event) => setCardDraft((current) => ({ ...current, name: event.target.value }))} placeholder="Emma Johnson" />
-                    </label>
-                    <button type="button" className="pill active" onClick={addProfileCard} disabled={uiState.updating || !cardDraft.name.trim() || cardDraft.last4.length !== 4}>Save card</button>
-                  </div>
+                <div className="profile-summary-grid">
+                  <button type="button" className="profile-menu-row compact active" onClick={() => setProfileSection('orders')}>
+                    <span>Past orders</span>
+                    <strong>{customerOrders.length || 'Open'}</strong>
+                  </button>
+                  <button type="button" className="profile-menu-row compact" onClick={() => setProfileSection('saved')}>
+                    <span>Saved cakes</span>
+                    <strong>{savedDesigns.length || 'None'}</strong>
+                  </button>
+                  <button type="button" className="profile-menu-row compact" onClick={() => setProfileSection('settings')}>
+                    <span>Addresses</span>
+                    <strong>{customerProfile.addresses.length || 'Add'}</strong>
+                  </button>
+                  <button type="button" className="profile-menu-row compact" onClick={() => setProfileSection('security')}>
+                    <span>Payments</span>
+                    <strong>{customerProfile.cards.length || 'Add'}</strong>
+                  </button>
                 </div>
               </>}
 
@@ -2903,14 +2857,36 @@ function App() {
               {profileSection === 'settings' && <>
                 <div className="editor-head">
                   <div>
-                    <span className="label">Settings</span>
-                    <strong>Customer preferences</strong>
+                    <span className="label">Addresses</span>
+                    <strong>Saved places</strong>
                   </div>
-                  <span className="mini-note">Simple</span>
+                  <span className="mini-note">Delivery</span>
                 </div>
-                <div className="list-row"><span>Notifications</span><strong>Order updates and promos</strong></div>
-                <div className="list-row"><span>Fulfillment preferences</span><strong>{fulfillmentType === 'delivery' ? 'Delivery-first checkout' : 'Pickup-first checkout'}</strong></div>
-                <div className="list-row"><span>Accessibility</span><strong>Readable text and comfort</strong></div>
+                <div className="list-row"><span>Status</span><strong>{customerProfile.addresses.length ? 'Saved addresses ready' : 'No addresses yet'}</strong></div>
+                {customerProfile.addresses.map((address) => (
+                  <button key={address.id} type="button" className={selectedAddressId === address.id ? 'profile-saved-row active' : 'profile-saved-row'} onClick={() => setSelectedAddressId(address.id)}>
+                    <div>
+                      <strong>{address.label}</strong>
+                      <span>{address.line1}</span>
+                    </div>
+                    <em>{selectedAddressId === address.id ? 'Selected' : 'Use'}</em>
+                  </button>
+                ))}
+                <div className="profile-form-grid">
+                  <label className="checkout-input-row">
+                    <span>Label</span>
+                    <input type="text" value={addressDraft.label} onChange={(event) => setAddressDraft((current) => ({ ...current, label: event.target.value }))} placeholder="Home, Work" />
+                  </label>
+                  <label className="checkout-input-row">
+                    <span>Address</span>
+                    <input type="text" value={addressDraft.line1} onChange={(event) => setAddressDraft((current) => ({ ...current, line1: event.target.value }))} placeholder="1234 Main St, Vancouver, BC" />
+                  </label>
+                  <label className="checkout-input-row">
+                    <span>Notes</span>
+                    <input type="text" value={addressDraft.instructions} onChange={(event) => setAddressDraft((current) => ({ ...current, instructions: event.target.value }))} placeholder="Buzz 204" />
+                  </label>
+                  <button type="button" className="pill active" onClick={addProfileAddress} disabled={uiState.updating || !addressDraft.label.trim() || !addressDraft.line1.trim()}>Save address</button>
+                </div>
               </>}
 
               {profileSection === 'help' && <>
@@ -2929,13 +2905,42 @@ function App() {
               {profileSection === 'security' && <>
                 <div className="editor-head">
                   <div>
-                    <span className="label">Logout</span>
-                    <strong>Account access</strong>
+                    <span className="label">Payments</span>
+                    <strong>Cards and account access</strong>
                   </div>
                   <span className="mini-note">Session</span>
                 </div>
                 <div className="list-row"><span>Status</span><strong>{authTokens.customer ? 'Connected' : 'Needs reconnect'}</strong></div>
                 <div className="list-row"><span>Device</span><strong>{sessionMeta.customer?.deviceLabel || 'This browser'}</strong></div>
+                <div className="list-row"><span>Saved cards</span><strong>{customerProfile.cards.length}</strong></div>
+                {customerProfile.cards.map((card) => (
+                  <button key={card.id} type="button" className="profile-saved-row" onClick={() => setPaymentCard({ brand: card.brand, last4: card.last4, name: card.name })}>
+                    <div>
+                      <strong>{card.brand} •••• {card.last4}</strong>
+                      <span>{card.name}</span>
+                    </div>
+                    <em>Use</em>
+                  </button>
+                ))}
+                <div className="profile-form-grid compact">
+                  <label className="checkout-input-row">
+                    <span>Brand</span>
+                    <select value={cardDraft.brand} onChange={(event) => setCardDraft((current) => ({ ...current, brand: event.target.value }))}>
+                      <option value="Visa">Visa</option>
+                      <option value="Mastercard">Mastercard</option>
+                      <option value="Amex">Amex</option>
+                    </select>
+                  </label>
+                  <label className="checkout-input-row">
+                    <span>Last 4</span>
+                    <input type="text" value={cardDraft.last4} maxLength={4} onChange={(event) => setCardDraft((current) => ({ ...current, last4: event.target.value.replace(/\D/g, '').slice(0, 4) }))} placeholder="1234" />
+                  </label>
+                  <label className="checkout-input-row">
+                    <span>Name on card</span>
+                    <input type="text" value={cardDraft.name} onChange={(event) => setCardDraft((current) => ({ ...current, name: event.target.value }))} placeholder="Full name" />
+                  </label>
+                  <button type="button" className="pill active" onClick={addProfileCard} disabled={uiState.updating || !cardDraft.name.trim() || cardDraft.last4.length !== 4}>Save card</button>
+                </div>
                 <div className="pill-row">
                   {authTokens.customer ? (
                     <button type="button" className="pill active" onClick={handleCustomerLogout} disabled={uiState.authUpdating}>{uiState.authUpdating ? 'Logging out...' : 'Logout'}</button>
