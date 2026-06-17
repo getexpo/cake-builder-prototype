@@ -11,7 +11,8 @@
 body {
   margin: 0;
   background: linear-gradient(180deg, #f7f2ed 0%, #efe4da 100%);
-  overflow: hidden;
+  overflow-x: hidden;
+  overflow-y: auto;
 }
 
 button,
@@ -25,8 +26,10 @@ button {
 }
 
 #root {
-  height: 100svh;
-  overflow: hidden;
+  min-height: 100vh;
+  min-height: 100svh;
+  overflow-x: hidden;
+  overflow-y: auto;
 }
 
 .auth-gate-page {
