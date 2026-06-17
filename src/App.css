@@ -1119,18 +1119,6 @@ html {
   border-bottom: 1px solid rgba(255,255,255,0.08);
 }
 
-.profile-menu-row.compact {
-  border-radius: 18px;
-  border-bottom: 0;
-  padding: 16px 18px;
-}
-
-.profile-summary-grid {
-  display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 12px;
-}
-
 .profile-menu-row:last-child {
   border-bottom: 0;
 }
