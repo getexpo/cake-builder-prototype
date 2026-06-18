@@ -570,7 +570,6 @@ function App() {
   const [view, setView] = useState('home')
   const [guestMode, setGuestMode] = useState(false)
   const [profileSection, setProfileSection] = useState('profile')
-  const [profileMenuExpanded, setProfileMenuExpanded] = useState(false)
   const [profileDrawerOpen, setProfileDrawerOpen] = useState(false)
   const [profileHelpOpen, setProfileHelpOpen] = useState(false)
   const [builderMenuOpen, setBuilderMenuOpen] = useState(false)
@@ -865,6 +864,7 @@ function App() {
     shopName: location.name,
     items: cart.filter((item) => item.shopId === location.id),
   })).filter((group) => group.items.length)
+  const otherCartGroups = cartGroups.filter((group) => group.shopId !== activeCartGroup?.shopId)
   const activeCartGroup = cartGroups.find((group) => group.shopId === selectedCartShopId) || cartGroups[0] || null
   const activeCheckoutItem = activeCartGroup?.items?.[activeCartGroup.items.length - 1] || cart[cart.length - 1] || null
   const activeCheckoutSavedDesign = activeCheckoutItem?.savedDesignId
@@ -1569,6 +1569,7 @@ function App() {
   function openCartGroup(shopId) {
     setSelectedCartShopId(shopId)
     setCheckoutStage('summary')
+    setPickupSlotId('')
     setView('checkout')
   }
 
@@ -2443,79 +2444,111 @@ function App() {
 
               {builderScreen === 'store-menu' && (
                 <>
-                  <div className="store-menu-summary-bar">
-                    <div>
-                      <span className="label">Menu</span>
-                      <strong>{selectedBakeryMenuItems.length} items available</strong>
+                  <div className="store-hero-card">
+                    <div className="store-hero-copy">
+                      <span className="label">Bakery menu</span>
+                      <h2>{selectedBakery?.name || 'Bakery'}</h2>
+                      <p>{selectedBakery?.hero || 'Fresh bakery options ready to browse.'}</p>
                     </div>
-                    <p>{selectedBakery?.hero || 'Fresh bakery options ready to browse.'}</p>
+                    <div className="store-hero-meta">
+                      <div className="store-hero-stat">
+                        <strong>{selectedBakeryMenuItems.length}</strong>
+                        <span>menu items</span>
+                      </div>
+                      <div className="store-hero-stat">
+                        <strong>{selectedBakeryCapability.fullCustom ? 'Custom on' : 'Preset only'}</strong>
+                        <span>{selectedBakery?.menuSummary || 'Menu available'}</span>
+                      </div>
+                    </div>
                   </div>
-                  <div className="store-menu-grid cleaner-store-menu-grid">
+
+                  <div className="store-section-head">
+                    <div>
+                      <strong>Order faster</strong>
+                      <span>Start with a bakery preset or jump into a custom build.</span>
+                    </div>
+                  </div>
+
+                  <div className="store-menu-grid polished-store-menu-grid">
                     {selectedBakeryMenuItems.map((item) => (
-                      <div key={item.id} className="store-menu-card cleaner-store-menu-card">
-                        <button type="button" className="store-menu-hit" onClick={() => {
+                      <button
+                        key={item.id}
+                        type="button"
+                        className="store-menu-card polished-store-menu-card"
+                        onClick={() => {
                           setSelectedMenuItem(item)
                           setBuilderScreen(item.type === 'custom' ? 'custom-builder' : 'item-detail')
-                        }}>
-                          <div className={`store-menu-image ${item.type === 'custom' ? 'custom' : ''}`}>
-                            <span>{item.image}</span>
-                            <div className="store-menu-tag">{item.type === 'custom' ? 'Custom' : 'Ready to order'}</div>
-                            <button
-                              type="button"
-                              className="store-menu-plus"
-                              onClick={(event) => {
-                                event.stopPropagation()
-                                if (item.type === 'custom') {
-                                  setSelectedMenuItem(item)
-                                  setBuilderScreen('custom-builder')
-                                  return
-                                }
-                                setSelectedMenuItem(item)
-                                setBuilderScreen('item-detail')
-                              }}
-                            >
-                              +
-                            </button>
+                        }}
+                      >
+                        <div className={`store-menu-image polished-store-menu-image ${item.type === 'custom' ? 'custom' : ''}`}>
+                          <div className="store-menu-image-overlay">
+                            <div className="store-menu-tag">{item.type === 'custom' ? 'Custom build' : 'Ready to order'}</div>
+                            <div className="store-menu-arrow">→</div>
                           </div>
-                          <div className="store-menu-copy">
-                            <div className="store-menu-price-row">
-                              <strong>{item.title}</strong>
-                              <span>{formatMoney(item.price)}</span>
-                            </div>
-                            <p>{item.description}</p>
-                            <small>{item.type === 'custom' ? 'Build it your way' : 'Quick add available'}</small>
+                          <span>{item.image}</span>
+                        </div>
+
+                        <div className="store-menu-copy polished-store-menu-copy">
+                          <div className="store-menu-price-row">
+                            <strong>{item.title}</strong>
+                            <span>{formatMoney(item.price)}</span>
                           </div>
-                        </button>
-                      </div>
+                          <p>{item.description}</p>
+                          <small>{item.type === 'custom' ? 'Choose every layer and finish' : 'Quickest path to checkout'}</small>
+                        </div>
+                      </button>
                     ))}
                   </div>
                 </>
               )}
 
               {builderScreen === 'item-detail' && selectedMenuItem && (
-                <div className="single-flow-card item-detail-card cleaner-item-detail-card">
-                  <div className="store-menu-image detail-image">
+                <div className="single-flow-card item-detail-card polished-item-detail-card">
+                  <div className="store-menu-image detail-image polished-detail-image">
+                    <div className="store-menu-image-overlay">
+                      <div className="store-menu-tag detail-tag">Bakery favorite</div>
+                    </div>
                     <span>{selectedMenuItem.image}</span>
-                    <div className="store-menu-tag detail-tag">Bakery favorite</div>
                   </div>
-                  <div className="editor-head">
-                    <div>
-                      <span className="label">Cake details</span>
-                      <strong>{selectedMenuItem.title}</strong>
+
+                  <div className="detail-copy-stack">
+                    <div className="editor-head">
+                      <div>
+                        <span className="label">Cake details</span>
+                        <strong>{selectedMenuItem.title}</strong>
+                      </div>
+                      <strong>{formatMoney(selectedMenuItem.price)}</strong>
                     </div>
-                    <strong>{formatMoney(selectedMenuItem.price)}</strong>
-                  </div>
-                  <p>{selectedMenuItem.detail}</p>
-                  <div className="option-card chip-option-card cleaner-included-card">
-                    <span>What you get</span>
-                    <div className="pill-row compact">
-                      <span className="pill static-pill">6 inch</span>
-                      <span className="pill static-pill">Bakery finished</span>
-                      <span className="pill static-pill">Ready for pickup</span>
+
+                    <p>{selectedMenuItem.detail}</p>
+
+                    <div className="detail-info-list">
+                      <div className="detail-info-row">
+                        <span>Best for</span>
+                        <strong>Fast checkout</strong>
+                      </div>
+                      <div className="detail-info-row">
+                        <span>Pickup</span>
+                        <strong>{selectedBakery?.name || 'Selected bakery'}</strong>
+                      </div>
+                      <div className="detail-info-row">
+                        <span>Style</span>
+                        <strong>Bakery finished</strong>
+                      </div>
+                    </div>
+
+                    <div className="option-card chip-option-card cleaner-included-card polished-included-card">
+                      <span>Included</span>
+                      <div className="pill-row compact">
+                        <span className="pill static-pill">6 inch</span>
+                        <span className="pill static-pill">Finished design</span>
+                        <span className="pill static-pill">Pickup ready</span>
+                      </div>
                     </div>
                   </div>
+
                   <div className="flow-step-footer sticky-cart-footer">
-                    <button type="button" className="cta" onClick={() => addPresetMenuItemToCart(selectedMenuItem)}>
+                    <button type="button" className="cta polished-primary-cta" onClick={() => addPresetMenuItemToCart(selectedMenuItem)}>
                       Add to cart • {formatMoney(selectedMenuItem.price)}
                     </button>
                   </div>
@@ -2571,8 +2604,30 @@ function App() {
               <>
                 <div className="uber-cart-title-block compact-cart-title-block">
                   <h2>Your cart</h2>
-                  <p>{cartItemCount} item{cartItemCount === 1 ? '' : 's'}</p>
+                  <p>{activeCartGroup?.shopName || checkoutShopLabel} · {activeCartGroup?.items?.length || 0} item{(activeCartGroup?.items?.length || 0) === 1 ? '' : 's'}</p>
                 </div>
+
+                {cartGroups.length > 1 ? (
+                  <div className="checkout-summary-card cleaner-cart-group-card">
+                    <div className="section-head-simple">
+                      <strong>Stores in this order</strong>
+                      <span>{cartGroups.length} active</span>
+                    </div>
+                    <div className="cart-group-switcher">
+                      {cartGroups.map((group) => (
+                        <button
+                          key={group.shopId}
+                          type="button"
+                          className={selectedCartShopId === group.shopId ? 'cart-group-chip active' : 'cart-group-chip'}
+                          onClick={() => setSelectedCartShopId(group.shopId)}
+                        >
+                          <strong>{group.shopName}</strong>
+                          <span>{group.items.length} item{group.items.length === 1 ? '' : 's'} · {formatMoney(group.items.reduce((sum, item) => sum + (item.totalPrice || 0), 0))}</span>
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                ) : null}
 
                 <div className="uber-cart-items">
                   {!activeCartGroup?.items?.length ? <p>No cakes in this cart yet.</p> : activeCartGroup.items.map((item) => <div key={item.id} className="uber-cart-item-row"><div className="uber-cart-item-image"><span>Cake</span></div><div className="uber-cart-item-copy"><strong>{item.title}</strong><p>{cakeTypes.find((type) => type.id === item.config.cakeType)?.label || 'Cake'} · {item.layerCount} layers</p><small>{formatMoney(item.unitPrice || item.totalPrice)}</small></div><div className="uber-cart-stepper"><button type="button" className="stepper-btn" aria-label="Remove one item" onClick={() => updateCartItemQuantity(item.id, -1)}>−</button><span>{item.quantity || 1}</span><button type="button" className="stepper-btn" aria-label="Add one item" onClick={() => updateCartItemQuantity(item.id, 1)}>+</button></div></div>)}
@@ -2586,14 +2641,14 @@ function App() {
                 <div className="checkout-summary-card">
                   <div className="section-head-simple">
                     <strong>Summary</strong>
-                    <span>{cartItemCount} item{cartItemCount === 1 ? '' : 's'}</span>
+                    <span>{formatMoney(cartSubtotal)} subtotal</span>
                   </div>
                   <div className="fulfillment-switch-row">
                     <button type="button" className={fulfillmentType === 'pickup' ? 'fulfillment-chip active' : 'fulfillment-chip'} onClick={() => setFulfillmentType('pickup')}>Pickup</button>
                     <button type="button" className={fulfillmentType === 'delivery' ? 'fulfillment-chip active' : 'fulfillment-chip'} onClick={() => setFulfillmentType('delivery')}>Delivery</button>
                   </div>
                   <div className="checkout-price-row"><span>Subtotal</span><strong>{formatMoney(cartSubtotal)}</strong></div>
-                  <div className="checkout-price-row"><span>Delivery fee</span><strong>{formatMoney(deliveryFee)}</strong></div>
+                  <div className="checkout-price-row"><span>Delivery fee</span><strong>{deliveryFee ? formatMoney(deliveryFee) : 'Free'}</strong></div>
                   <div className="checkout-price-row"><span>Service fee</span><strong>{formatMoney(serviceFee)}</strong></div>
                   <div className="checkout-price-row"><span>GST / HST</span><strong>${gstHst.toFixed(2)}</strong></div>
                   <div className="checkout-price-row total"><span>Total</span><strong>${checkoutTotal.toFixed(2)}</strong></div>
@@ -2605,6 +2660,7 @@ function App() {
                       <strong>Pickup</strong>
                       <span>{activeCartGroup?.shopName || checkoutShopLabel}</span>
                     </div>
+                    {recommendedPickupSlot ? <div className="checkout-inline-status-card"><strong>Suggested window</strong><p>{formatPickupWindow(recommendedPickupSlot)} · {getPickupSlotState(recommendedPickupSlot).detail}</p></div> : null}
                     <div className="layer-map">
                       {sortedPickupSlots.map((slot) => {
                         const state = getPickupSlotState(slot)
@@ -2623,6 +2679,7 @@ function App() {
                       <strong>Delivery address</strong>
                       <span>{activeCartGroup?.shopName || checkoutShopLabel}</span>
                     </div>
+                    {!selectedAddress ? <div className="checkout-inline-status-card"><strong>No address selected</strong><p>Choose a saved address before continuing to payment.</p></div> : null}
                     <div className="layer-map">
                       {customerProfile.addresses.map((address) => (
                         <button key={address.id} type="button" className={selectedAddressId === address.id ? 'layer-chip active' : 'layer-chip'} onClick={() => setSelectedAddressId(address.id)}>
@@ -2633,6 +2690,23 @@ function App() {
                     </div>
                   </div>
                 )}
+
+                {otherCartGroups.length ? (
+                  <div className="checkout-summary-card cleaner-cart-group-card">
+                    <div className="section-head-simple">
+                      <strong>Other store carts</strong>
+                      <span>Switch anytime</span>
+                    </div>
+                    <div className="cart-group-switcher compact">
+                      {otherCartGroups.map((group) => (
+                        <button key={group.shopId} type="button" className="cart-group-chip" onClick={() => openCartGroup(group.shopId)}>
+                          <strong>{group.shopName}</strong>
+                          <span>{group.items.length} item{group.items.length === 1 ? '' : 's'}</span>
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                ) : null}
 
                 <div className="uber-cart-footer">
                   {!authTokens.customer ? (
@@ -2765,7 +2839,7 @@ function App() {
           <section className="screen-card profile-menu-screen">
             <div className="profile-menu-head cleaner-profile-head">
               <h2>Account</h2>
-              <p className="screen-subcopy">Manage your details, addresses, and payments.</p>
+              <p className="screen-subcopy">Manage your details, saved cakes, orders, and checkout preferences.</p>
             </div>
 
             {profileSection === 'profile' && (
@@ -2815,7 +2889,7 @@ function App() {
                 <button type="button" className="cleaner-profile-row" onClick={() => setProfileSection('settings')}>
                   <div>
                     <strong>Settings</strong>
-                    <span>Notifications and checkout preferences</span>
+                    <span>Notifications, fulfillment, and accessibility</span>
                   </div>
                   <em>›</em>
                 </button>
@@ -2960,9 +3034,34 @@ function App() {
                 <button type="button" className="pill" onClick={() => setProfileSection('profile')}>Back</button>
                 <strong>Settings</strong>
               </div>
-              <div className="list-row"><span>Notifications</span><strong>Order updates and promos</strong></div>
-              <div className="list-row"><span>Fulfillment preferences</span><strong>{fulfillmentType === 'delivery' ? 'Delivery-first checkout' : 'Pickup-first checkout'}</strong></div>
-              <div className="list-row"><span>Accessibility</span><strong>Readable text and comfort</strong></div>
+              <div className="profile-stack-block settings-stack-block">
+                <div className="list-row"><span>Notifications</span><strong>Order updates and promos</strong></div>
+                <div className="list-row"><span>Fulfillment preferences</span><strong>{fulfillmentType === 'delivery' ? 'Delivery-first checkout' : 'Pickup-first checkout'}</strong></div>
+                <div className="list-row"><span>Accessibility</span><strong>Readable text and comfort</strong></div>
+              </div>
+            </div>}
+
+            {profileSection === 'notifications' && <div className="list-card profile-detail-card cleaner-profile-detail-card">
+              <div className="cleaner-profile-subhead">
+                <button type="button" className="pill" onClick={() => setProfileSection('profile')}>Back</button>
+                <strong>Notifications</strong>
+              </div>
+              <div className="profile-stack-block settings-stack-block">
+                {customerNotifications.slice(0, 5).map((item) => (
+                  <div key={item.id} className="profile-saved-row static">
+                    <div>
+                      <strong>{item.eventType ? formatStatus(item.eventType) : 'Order update'}</strong>
+                      <span>{item.message || item.channel || 'Live order notification'}</span>
+                    </div>
+                    <em>{formatShortTimestamp(item.createdAt)}</em>
+                  </div>
+                ))}
+                {!customerNotifications.length ? (
+                  notificationMoments.map((item) => (
+                    <div key={item} className="list-row"><span>{item}</span><strong>Enabled</strong></div>
+                  ))
+                ) : null}
+              </div>
             </div>}
 
             {profileSection === 'help' && <div className="list-card profile-detail-card cleaner-profile-detail-card">
