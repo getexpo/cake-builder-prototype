@@ -721,6 +721,31 @@ html {
   align-items: center;
 }
 
+.cleaner-checkout-header {
+  gap: 10px;
+}
+
+.checkout-stage-inline {
+  flex: 1;
+  min-width: 0;
+  display: grid;
+  gap: 2px;
+  text-align: center;
+}
+
+.checkout-stage-inline strong {
+  font-size: 1rem;
+  color: #241b16;
+}
+
+.checkout-stage-inline span {
+  font-size: 0.78rem;
+  color: #7d675c;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
 .icon-pill {
   width: 42px;
   height: 42px;
@@ -736,9 +761,17 @@ html {
   font-size: 2rem;
 }
 
+.compact-cart-title-block {
+  gap: 2px;
+}
+
+.compact-cart-title-block h2 {
+  font-size: 1.8rem;
+}
+
 .uber-cart-items {
   display: grid;
-  gap: 16px;
+  gap: 14px;
 }
 
 .uber-cart-item-row {
@@ -823,8 +856,9 @@ html {
 .uber-cart-footer {
   position: sticky;
   bottom: 0;
-  background: linear-gradient(180deg, rgba(255,253,251,0.94) 0%, rgba(255,253,251,1) 18%);
-  padding-top: 12px;
+  background: linear-gradient(180deg, rgba(255,253,251,0.82) 0%, rgba(255,253,251,1) 24%);
+  padding-top: 10px;
+  padding-bottom: 6px;
 }
 
 .checkout-upgrade-screen {
@@ -832,10 +866,7 @@ html {
 }
 
 .checkout-stage-tabs {
-  display: grid;
-  grid-template-columns: 1fr 1fr;
-  gap: 10px;
-  padding: 0 16px;
+  display: none;
 }
 
 .checkout-stage-tab {
@@ -856,14 +887,14 @@ html {
 .checkout-summary-card,
 .checkout-payment-card,
 .live-map-card {
-  margin: 0 16px;
-  border-radius: 22px;
+  margin: 0;
+  border-radius: 20px;
   background: #fff;
   border: 1px solid #eadfd7;
-  padding: 16px;
+  padding: 15px;
   display: grid;
   gap: 12px;
-  box-shadow: 0 12px 26px rgba(74, 42, 29, 0.08);
+  box-shadow: 0 10px 22px rgba(74, 42, 29, 0.06);
 }
 
 .checkout-price-row {
@@ -1080,11 +1111,11 @@ html {
   width: 100%;
   border: 0;
   border-radius: 18px;
-  padding: 16px;
+  padding: 15px;
   background: #000;
   color: #fff;
   font-weight: 700;
-  font-size: 1.05rem;
+  font-size: 1rem;
 }
 
 .sticky-cart-footer {

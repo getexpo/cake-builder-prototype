@@ -2535,8 +2535,12 @@ function App() {
 
         {view === 'checkout' && (
           <section className="screen-card uber-cart-screen checkout-upgrade-screen">
-            <div className="uber-cart-header">
-              <button type="button" className="icon-pill" onClick={() => checkoutStage === 'placed' ? setView('saved') : setView('saved')}>×</button>
+            <div className="uber-cart-header cleaner-checkout-header">
+              <button type="button" className="icon-pill" onClick={() => checkoutStage === 'payment' ? setCheckoutStage('summary') : checkoutStage === 'placed' ? setView('saved') : setView('saved')}>{checkoutStage === 'payment' ? '←' : '×'}</button>
+              <div className="checkout-stage-inline">
+                <strong>{checkoutStage === 'payment' ? 'Payment' : checkoutStage === 'placed' ? 'Order confirmed' : 'Your cart'}</strong>
+                <span>{activeCartGroup?.shopName || 'Downtown Vancouver'}</span>
+              </div>
               <button type="button" className="icon-pill" onClick={() => {
                 setCustomerShopId(activeCartGroup?.shopId || customerShopId)
                 setBuilderScreen('store-menu')
@@ -2544,18 +2548,11 @@ function App() {
               }}>+</button>
             </div>
 
-            {checkoutStage !== 'placed' && (
-              <div className="checkout-stage-tabs">
-                <button type="button" className={checkoutStage === 'summary' ? 'checkout-stage-tab active' : 'checkout-stage-tab'} onClick={() => setCheckoutStage('summary')}>Order summary</button>
-                <button type="button" className={checkoutStage === 'payment' ? 'checkout-stage-tab active' : 'checkout-stage-tab'} onClick={() => setCheckoutStage('payment')} disabled={!cart.length}>Payment</button>
-              </div>
-            )}
-
             {checkoutStage === 'summary' && (
               <>
-                <div className="uber-cart-title-block">
-                  <h2>{activeCartGroup?.shopName || 'Your cart'}</h2>
-                  <p>Review the order before payment.</p>
+                <div className="uber-cart-title-block compact-cart-title-block">
+                  <h2>Your cart</h2>
+                  <p>{cartItemCount} item{cartItemCount === 1 ? '' : 's'}</p>
                 </div>
 
                 <div className="uber-cart-items">
@@ -2569,7 +2566,7 @@ function App() {
 
                 <div className="checkout-summary-card">
                   <div className="section-head-simple">
-                    <strong>Order summary</strong>
+                    <strong>Summary</strong>
                     <span>{cartItemCount} item{cartItemCount === 1 ? '' : 's'}</span>
                   </div>
                   <div className="fulfillment-switch-row">
@@ -2634,14 +2631,14 @@ function App() {
 
             {checkoutStage === 'payment' && (
               <>
-                <div className="uber-cart-title-block">
+                <div className="uber-cart-title-block compact-cart-title-block">
                   <h2>Payment</h2>
-                  <p>Login first, then add a saved card like Uber.</p>
+                  <p>Add a card and confirm your order.</p>
                 </div>
 
                 <div className="checkout-payment-card">
                   <div className="section-head-simple">
-                    <strong>Profile and payment</strong>
+                    <strong>Payment method</strong>
                     <span>{paymentCard.brand}</span>
                   </div>
                   <div className="checkout-profile-mini-card">
@@ -2649,7 +2646,7 @@ function App() {
                     <span>{customerProfile.email}</span>
                   </div>
                   <label className="checkout-input-row">
-                    <span>Delivery / saved address</span>
+                    <span>Address</span>
                     <select value={selectedAddressId} onChange={(event) => setSelectedAddressId(event.target.value)}>
                       {customerProfile.addresses.map((address) => <option key={address.id} value={address.id}>{address.label} · {address.line1}</option>)}
                     </select>
