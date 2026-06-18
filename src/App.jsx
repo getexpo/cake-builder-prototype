@@ -2132,17 +2132,26 @@ function App() {
 
         {view === 'home' && (
           <section className="screen-card marketplace-screen uber-home-screen">
-            <div className="marketplace-hero uber-home-hero">
+            <div className="marketplace-hero uber-home-hero richer-home-hero">
               <div className="marketplace-topbar uber-home-topbar">
                 <div className="marketplace-location-pill uber-location-pill">
+                  <span>Delivering from</span>
                   <strong>{customerShopLabel}</strong>
                 </div>
                 <button type="button" className="marketplace-notice-button" aria-label="Notifications">◌</button>
               </div>
+              <div className="uber-home-hero-copy">
+                <h2>Order cakes that feel ready for tonight.</h2>
+                <p>Pick a bakery, browse fast, and jump straight into custom or ready-made cakes.</p>
+              </div>
             </div>
 
-            <div className="uber-home-heading">
-              <h2>All bakeries</h2>
+            <div className="uber-home-heading cleaner-home-heading">
+              <div>
+                <span className="label">Nearby bakeries</span>
+                <h2>Choose a bakery</h2>
+              </div>
+              <p>{ownerLocations.length} bakery option{ownerLocations.length === 1 ? '' : 's'}</p>
             </div>
 
             <div className="marketplace-store-list uber-store-list">
@@ -2155,7 +2164,7 @@ function App() {
                     ? 'Preset cakes + edits'
                     : 'Preset cakes only'
                 const storeEta = index === 0 ? '10 min' : index === 1 ? '14 min' : '18 min'
-                const storeSubline = index === 0 ? 'Best Overall' : index === 1 ? '4.8★ (120+)' : 'Popular nearby'
+                const storeSubline = index === 0 ? 'Best overall' : index === 1 ? '4.8★ rating' : 'Popular nearby'
 
                 return (
                   <button
@@ -2171,8 +2180,9 @@ function App() {
                   >
                     <div className={`uber-store-image ${accentClass}`}>
                       <div className="marketplace-store-fade" />
+                      <div className="uber-store-badge">{storeEta}</div>
                     </div>
-                    <div className="uber-store-content">
+                    <div className="uber-store-content cleaner-store-content">
                       <div className="uber-store-title-row">
                         <h3>{location.name}</h3>
                         <span className="uber-store-heart">♡</span>
@@ -2180,9 +2190,9 @@ function App() {
                       <div className="uber-store-meta-line">
                         <span>{storeMeta}</span>
                         <span>•</span>
-                        <span>{storeEta}</span>
+                        <span>{storeSubline}</span>
                       </div>
-                      <div className="uber-store-subline">{storeSubline}</div>
+                      <div className="uber-store-subline">Open menu</div>
                     </div>
                   </button>
                 )
@@ -2194,14 +2204,14 @@ function App() {
         {view === 'builder' && (
           <>
             <section className="customer-shell minimal-builder-shell">
-              <header className="customer-header minimal-builder-header">
+              <header className="customer-header minimal-builder-header cleaner-builder-header">
                 <div className="minimal-builder-title">
-                  <p className="eyebrow">Build</p>
+                  <p className="eyebrow">Bakery</p>
                   <h2>{customerShopLabel}</h2>
-                  <p className="screen-subcopy">{builderScreen === 'store-menu' ? 'Choose from this store menu.' : builderScreen === 'item-detail' ? selectedMenuItem?.description : selectedBakery?.hero}</p>
+                  <p className="screen-subcopy">{builderScreen === 'store-menu' ? 'Pick a cake to customize or add fast.' : builderScreen === 'item-detail' ? selectedMenuItem?.description : selectedBakery?.hero}</p>
                 </div>
                 <div className="pill-row compact">
-                  <button type="button" className="pill" onClick={() => builderScreen === 'store-menu' ? setView('home') : builderScreen === 'item-detail' ? setBuilderScreen('store-menu') : setBuilderScreen('store-menu')}>{builderScreen === 'store-menu' ? 'All Stores' : 'Back to menu'}</button>
+                  <button type="button" className="pill" onClick={() => builderScreen === 'store-menu' ? setView('home') : builderScreen === 'item-detail' ? setBuilderScreen('store-menu') : setBuilderScreen('store-menu')}>{builderScreen === 'store-menu' ? 'All bakeries' : 'Back to menu'}</button>
                   {builderScreen === 'custom-builder' ? <button type="button" className="menu-dot-button" aria-label="Menu" onClick={() => { setBuilderStep('review'); setBuilderMenuOpen((current) => !current) }}>☰</button> : null}
                 </div>
               </header>
@@ -2432,47 +2442,61 @@ function App() {
               {builderScreen === 'custom-builder' && builderMenuOpen && <div className="builder-menu-backdrop" onClick={() => setBuilderMenuOpen(false)} />}
 
               {builderScreen === 'store-menu' && (
-                <div className="store-menu-grid">
-                  {selectedBakeryMenuItems.map((item) => (
-                    <div key={item.id} className="store-menu-card">
-                      <button type="button" className="store-menu-hit" onClick={() => {
-                        setSelectedMenuItem(item)
-                        setBuilderScreen(item.type === 'custom' ? 'custom-builder' : 'item-detail')
-                      }}>
-                        <div className={`store-menu-image ${item.type === 'custom' ? 'custom' : ''}`}>
-                          <span>{item.image}</span>
-                          <button
-                            type="button"
-                            className="store-menu-plus"
-                            onClick={(event) => {
-                              event.stopPropagation()
-                              if (item.type === 'custom') {
-                                setSelectedMenuItem(item)
-                                setBuilderScreen('custom-builder')
-                                return
-                              }
-                              setSelectedMenuItem(item)
-                              setBuilderScreen('item-detail')
-                            }}
-                          >
-                            +
-                          </button>
-                        </div>
-                        <div className="store-menu-copy">
-                          <strong>{item.title}</strong>
-                          <span>{formatMoney(item.price)}</span>
-                          <p>{item.description}</p>
-                        </div>
-                      </button>
+                <>
+                  <div className="store-menu-summary-bar">
+                    <div>
+                      <span className="label">Menu</span>
+                      <strong>{selectedBakeryMenuItems.length} items available</strong>
                     </div>
-                  ))}
-                </div>
+                    <p>{selectedBakery?.hero || 'Fresh bakery options ready to browse.'}</p>
+                  </div>
+                  <div className="store-menu-grid cleaner-store-menu-grid">
+                    {selectedBakeryMenuItems.map((item) => (
+                      <div key={item.id} className="store-menu-card cleaner-store-menu-card">
+                        <button type="button" className="store-menu-hit" onClick={() => {
+                          setSelectedMenuItem(item)
+                          setBuilderScreen(item.type === 'custom' ? 'custom-builder' : 'item-detail')
+                        }}>
+                          <div className={`store-menu-image ${item.type === 'custom' ? 'custom' : ''}`}>
+                            <span>{item.image}</span>
+                            <div className="store-menu-tag">{item.type === 'custom' ? 'Custom' : 'Ready to order'}</div>
+                            <button
+                              type="button"
+                              className="store-menu-plus"
+                              onClick={(event) => {
+                                event.stopPropagation()
+                                if (item.type === 'custom') {
+                                  setSelectedMenuItem(item)
+                                  setBuilderScreen('custom-builder')
+                                  return
+                                }
+                                setSelectedMenuItem(item)
+                                setBuilderScreen('item-detail')
+                              }}
+                            >
+                              +
+                            </button>
+                          </div>
+                          <div className="store-menu-copy">
+                            <div className="store-menu-price-row">
+                              <strong>{item.title}</strong>
+                              <span>{formatMoney(item.price)}</span>
+                            </div>
+                            <p>{item.description}</p>
+                            <small>{item.type === 'custom' ? 'Build it your way' : 'Quick add available'}</small>
+                          </div>
+                        </button>
+                      </div>
+                    ))}
+                  </div>
+                </>
               )}
 
               {builderScreen === 'item-detail' && selectedMenuItem && (
-                <div className="single-flow-card item-detail-card">
+                <div className="single-flow-card item-detail-card cleaner-item-detail-card">
                   <div className="store-menu-image detail-image">
                     <span>{selectedMenuItem.image}</span>
+                    <div className="store-menu-tag detail-tag">Bakery favorite</div>
                   </div>
                   <div className="editor-head">
                     <div>
@@ -2482,17 +2506,17 @@ function App() {
                     <strong>{formatMoney(selectedMenuItem.price)}</strong>
                   </div>
                   <p>{selectedMenuItem.detail}</p>
-                  <div className="option-card chip-option-card">
-                    <span>Included</span>
+                  <div className="option-card chip-option-card cleaner-included-card">
+                    <span>What you get</span>
                     <div className="pill-row compact">
                       <span className="pill static-pill">6 inch</span>
-                      <span className="pill static-pill">Pickup</span>
                       <span className="pill static-pill">Bakery finished</span>
+                      <span className="pill static-pill">Ready for pickup</span>
                     </div>
                   </div>
                   <div className="flow-step-footer sticky-cart-footer">
                     <button type="button" className="cta" onClick={() => addPresetMenuItemToCart(selectedMenuItem)}>
-                      Add 1 to cart • {formatMoney(selectedMenuItem.price)}
+                      Add to cart • {formatMoney(selectedMenuItem.price)}
                     </button>
                   </div>
                 </div>
