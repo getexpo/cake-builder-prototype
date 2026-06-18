@@ -582,21 +582,16 @@ function App() {
   const [pickupSlotId, setPickupSlotId] = useState('')
   const [checkoutStage, setCheckoutStage] = useState('summary')
   const [fulfillmentType, setFulfillmentType] = useState('pickup')
-  const [paymentCard, setPaymentCard] = useState({ name: 'Emma Johnson', last4: '4242', brand: 'Visa' })
+  const [paymentCard, setPaymentCard] = useState({ name: '', last4: '', brand: 'Visa' })
   const [addressDraft, setAddressDraft] = useState({ label: '', line1: '', instructions: '' })
-  const [cardDraft, setCardDraft] = useState({ brand: 'Visa', last4: '', name: 'Emma Johnson' })
+  const [cardDraft, setCardDraft] = useState({ brand: 'Visa', last4: '', name: '' })
   const [customerProfile, setCustomerProfile] = useState({
-    fullName: 'Emma Johnson',
-    email: DEMO_USERS.customer.email,
-    addresses: [
-      { id: 'addr-home', label: 'Home', line1: '1234 Main St, Vancouver, BC' },
-      { id: 'addr-work', label: 'Work', line1: '880 West Pender St, Vancouver, BC' },
-    ],
-    cards: [
-      { id: 'card-1', brand: 'Visa', last4: '4242', name: 'Emma Johnson' },
-    ],
+    fullName: '',
+    email: '',
+    addresses: [],
+    cards: [],
   })
-  const [selectedAddressId, setSelectedAddressId] = useState('addr-home')
+  const [selectedAddressId, setSelectedAddressId] = useState('')
   const [latestPlacedOrder, setLatestPlacedOrder] = useState(null)
   const [customerShopId, setCustomerShopId] = useState(DEFAULT_SHOP_ID)
   const [accountType, setAccountType] = useState('customer')
@@ -2541,7 +2536,7 @@ function App() {
                 <strong>{checkoutStage === 'payment' ? 'Payment' : checkoutStage === 'placed' ? 'Order confirmed' : 'Your cart'}</strong>
                 <span>{activeCartGroup?.shopName || 'Downtown Vancouver'}</span>
               </div>
-              <button type="button" className="icon-pill" onClick={() => {
+              <button type="button" className="icon-pill" aria-label="Add more items" onClick={() => {
                 setCustomerShopId(activeCartGroup?.shopId || customerShopId)
                 setBuilderScreen('store-menu')
                 setView('builder')
@@ -2556,7 +2551,7 @@ function App() {
                 </div>
 
                 <div className="uber-cart-items">
-                  {!activeCartGroup?.items?.length ? <p>No cakes in this cart yet.</p> : activeCartGroup.items.map((item) => <div key={item.id} className="uber-cart-item-row"><div className="uber-cart-item-image"><span>Cake</span></div><div className="uber-cart-item-copy"><strong>{item.title}</strong><p>{cakeTypes.find((type) => type.id === item.config.cakeType)?.label || 'Cake'} · {item.layerCount} layers</p><small>{formatMoney(item.unitPrice || item.totalPrice)}</small></div><div className="uber-cart-stepper"><button type="button" className="stepper-btn" onClick={() => updateCartItemQuantity(item.id, -1)}>−</button><span>{item.quantity || 1}</span><button type="button" className="stepper-btn" onClick={() => updateCartItemQuantity(item.id, 1)}>+</button></div></div>)}
+                  {!activeCartGroup?.items?.length ? <p>No cakes in this cart yet.</p> : activeCartGroup.items.map((item) => <div key={item.id} className="uber-cart-item-row"><div className="uber-cart-item-image"><span>Cake</span></div><div className="uber-cart-item-copy"><strong>{item.title}</strong><p>{cakeTypes.find((type) => type.id === item.config.cakeType)?.label || 'Cake'} · {item.layerCount} layers</p><small>{formatMoney(item.unitPrice || item.totalPrice)}</small></div><div className="uber-cart-stepper"><button type="button" className="stepper-btn" aria-label="Remove one item" onClick={() => updateCartItemQuantity(item.id, -1)}>−</button><span>{item.quantity || 1}</span><button type="button" className="stepper-btn" aria-label="Add one item" onClick={() => updateCartItemQuantity(item.id, 1)}>+</button></div></div>)}
                   {activeCartGroup?.shopId ? <button type="button" className="uber-add-items-btn" onClick={() => {
                     setCustomerShopId(activeCartGroup.shopId)
                     setBuilderScreen('store-menu')
@@ -2642,22 +2637,31 @@ function App() {
                     <span>{paymentCard.brand}</span>
                   </div>
                   <div className="checkout-profile-mini-card">
-                    <strong>{customerProfile.fullName}</strong>
-                    <span>{customerProfile.email}</span>
+                    <strong>{customerProfile.fullName || 'No account name saved yet'}</strong>
+                    <span>{customerProfile.email || 'Add an email in Account'}</span>
                   </div>
-                  <label className="checkout-input-row">
-                    <span>Address</span>
-                    <select value={selectedAddressId} onChange={(event) => setSelectedAddressId(event.target.value)}>
-                      {customerProfile.addresses.map((address) => <option key={address.id} value={address.id}>{address.label} · {address.line1}</option>)}
-                    </select>
-                  </label>
+                  {fulfillmentType === 'delivery' ? (
+                    <label className="checkout-input-row">
+                      <span>Delivery address</span>
+                      <select value={selectedAddressId} onChange={(event) => setSelectedAddressId(event.target.value)}>
+                        <option value="">Choose an address</option>
+                        {customerProfile.addresses.map((address) => <option key={address.id} value={address.id}>{address.label} · {address.line1}</option>)}
+                      </select>
+                    </label>
+                  ) : (
+                    <div className="checkout-inline-status-card">
+                      <span className="label">Pickup</span>
+                      <strong>{selectedPickupSlot ? formatPickupWindow(selectedPickupSlot) : 'Pickup time not selected'}</strong>
+                      <p>{activeCartGroup?.shopName || checkoutShopLabel}</p>
+                    </div>
+                  )}
                   <label className="checkout-input-row">
                     <span>Name on card</span>
-                    <input type="text" value={paymentCard.name} onChange={(event) => setPaymentCard((current) => ({ ...current, name: event.target.value }))} />
+                    <input type="text" value={paymentCard.name} placeholder="Enter the cardholder name" onChange={(event) => setPaymentCard((current) => ({ ...current, name: event.target.value }))} />
                   </label>
                   <label className="checkout-input-row">
                     <span>Card ending in</span>
-                    <input type="text" value={paymentCard.last4} maxLength={4} onChange={(event) => setPaymentCard((current) => ({ ...current, last4: event.target.value.replace(/\D/g, '').slice(0, 4) }))} />
+                    <input type="text" value={paymentCard.last4} placeholder="Last 4 digits" maxLength={4} onChange={(event) => setPaymentCard((current) => ({ ...current, last4: event.target.value.replace(/\D/g, '').slice(0, 4) }))} />
                   </label>
                   {!!customerProfile.cards.length && (
                     <div className="saved-cards-stack">
@@ -2685,13 +2689,13 @@ function App() {
               <>
                 <div className="uber-cart-title-block placed-order-head">
                   <h2>Order confirmed</h2>
-                  <p>Payment went through. Here’s the full confirmation.</p>
+                  <p>Your order is in. Here is the full confirmation.</p>
                 </div>
 
                 <div className="live-map-card">
                   <div className="section-head-simple">
-                    <strong>Live map</strong>
-                    <span>Uber-style flow</span>
+                    <strong>Order progress</strong>
+                    <span>{(latestPlacedOrder?.fulfillment || fulfillmentType) === 'delivery' ? 'Delivery route' : 'Pickup timeline'}</span>
                   </div>
                   <div className="live-map-route">
                     <div className="live-map-dots" />
@@ -2717,7 +2721,7 @@ function App() {
                   <div className="checkout-price-row"><span>Total paid</span><strong>${Number(latestPlacedOrder?.total || checkoutTotal).toFixed(2)}</strong></div>
                   <div className="checkout-price-row"><span>{(latestPlacedOrder?.fulfillment || fulfillmentType) === 'delivery' ? 'Delivery address' : 'Pickup window'}</span><strong>{(latestPlacedOrder?.fulfillment || fulfillmentType) === 'delivery' ? (latestPlacedOrder?.address?.line1 || selectedAddress?.line1 || 'No address') : (latestPlacedOrder?.pickupSlot ? formatPickupWindow(latestPlacedOrder.pickupSlot) : (selectedPickupSlot ? formatPickupWindow(selectedPickupSlot) : 'Pending'))}</strong></div>
                   <div className="checkout-price-row"><span>Fulfillment</span><strong>{formatStatus(latestPlacedOrder?.fulfillment || fulfillmentType)}</strong></div>
-                  <div className="checkout-price-row"><span>Card used</span><strong>{latestPlacedOrder?.card?.brand || paymentCard.brand} •••• {latestPlacedOrder?.card?.last4 || paymentCard.last4}</strong></div>
+                  <div className="checkout-price-row"><span>Card used</span><strong>{latestPlacedOrder?.card?.brand || paymentCard.brand} •••• {latestPlacedOrder?.card?.last4 || paymentCard.last4 || 'Pending'}</strong></div>
                 </div>
 
                 <div className="uber-cart-footer dual-action-footer">
@@ -2844,7 +2848,7 @@ function App() {
                   <input type="text" value={addressDraft.label} onChange={(event) => setAddressDraft((current) => ({ ...current, label: event.target.value }))} placeholder="Home, Work, Mom's place" />
                 </label>
                 <label className="checkout-input-row">
-                  <span>Address</span>
+                  <span>Delivery address</span>
                   <input type="text" value={addressDraft.line1} onChange={(event) => setAddressDraft((current) => ({ ...current, line1: event.target.value }))} placeholder="1234 Main St, Vancouver, BC" />
                 </label>
                 <label className="checkout-input-row">
