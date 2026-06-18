@@ -2735,213 +2735,233 @@ function App() {
 
         {view === 'accounts' && (
           <section className="screen-card profile-menu-screen">
-            <div className="profile-menu-head">
-              <p className="eyebrow">Menu</p>
+            <div className="profile-menu-head cleaner-profile-head">
               <h2>Account</h2>
-              <p className="screen-subcopy">Clean customer menu, like a real app.</p>
+              <p className="screen-subcopy">Manage your details, addresses, and payments.</p>
             </div>
 
-            <div className="profile-menu-group list-card">
-              <button type="button" className={profileSection === 'profile' ? 'profile-menu-row active' : 'profile-menu-row'} onClick={() => setProfileSection('profile')}>
-                <span>Profile</span>
-                <strong>Name, email, bakery</strong>
-              </button>
-              <button type="button" className={profileSection === 'orders' ? 'profile-menu-row active' : 'profile-menu-row'} onClick={() => setProfileSection('orders')}>
-                <span>Orders</span>
-                <strong>Current cart and past orders</strong>
-              </button>
-              <button type="button" className={profileSection === 'saved' ? 'profile-menu-row active' : 'profile-menu-row'} onClick={() => setProfileSection('saved')}>
-                <span>Saved Cakes</span>
-                <strong>Favorites and reorders</strong>
-              </button>
-            </div>
-
-            <div className="profile-menu-group list-card">
-              <button type="button" className={profileSection === 'settings' ? 'profile-menu-row active' : 'profile-menu-row'} onClick={() => setProfileSection('settings')}>
-                <span>Settings</span>
-                <strong>Notifications and preferences</strong>
-              </button>
-              <button type="button" className={profileSection === 'help' ? 'profile-menu-row active' : 'profile-menu-row'} onClick={() => setProfileSection('help')}>
-                <span>Help</span>
-                <strong>Support, pickup, refunds</strong>
-              </button>
-              <button type="button" className={profileSection === 'security' ? 'profile-menu-row active' : 'profile-menu-row'} onClick={() => setProfileSection('security')}>
-                <span>Logout</span>
-                <strong>Session and account access</strong>
-              </button>
-            </div>
-
-            <div className="list-card profile-detail-card">
-              {profileSection === 'profile' && <>
-                <div className="editor-head">
+            {profileSection === 'profile' && (
+              <div className="list-card cleaner-profile-list">
+                <button type="button" className="cleaner-profile-row" onClick={() => setProfileSection('details')}>
                   <div>
-                    <span className="label">Profile</span>
-                    <strong>{accountSessions.customer?.name || DEFAULT_CUSTOMER_NAME}</strong>
+                    <strong>Full name</strong>
+                    <span>{customerProfile.fullName || accountSessions.customer?.name || DEFAULT_CUSTOMER_NAME}</span>
                   </div>
-                  <span className="mini-note">Customer</span>
-                </div>
-                <div className="list-row"><span>Name</span><strong>{customerProfile.fullName}</strong></div>
-                <div className="list-row"><span>Email</span><strong>{customerProfile.email}</strong></div>
-                <div className="list-row"><span>Addresses</span><strong>{customerProfile.addresses.length}</strong></div>
-                <div className="list-row"><span>Saved cards</span><strong>{customerProfile.cards.length}</strong></div>
-                <div className="list-row"><span>Preferred bakery</span><strong>{customerShopLabel}</strong></div>
-                <div className="list-row"><span>Saved cakes</span><strong>{savedDesigns.length}</strong></div>
-
-                <div className="profile-stack-block">
-                  <div className="section-head-simple">
-                    <strong>Saved addresses</strong>
-                    <span>{customerProfile.addresses.length ? 'Ready for delivery' : 'Add your first address'}</span>
-                  </div>
-                  {customerProfile.addresses.map((address) => (
-                    <button key={address.id} type="button" className={selectedAddressId === address.id ? 'profile-saved-row active' : 'profile-saved-row'} onClick={() => setSelectedAddressId(address.id)}>
-                      <div>
-                        <strong>{address.label}</strong>
-                        <span>{address.line1}</span>
-                      </div>
-                      <em>{selectedAddressId === address.id ? 'Selected' : 'Use'}</em>
-                    </button>
-                  ))}
-                  <div className="profile-form-grid">
-                    <label className="checkout-input-row">
-                      <span>Label</span>
-                      <input type="text" value={addressDraft.label} onChange={(event) => setAddressDraft((current) => ({ ...current, label: event.target.value }))} placeholder="Home, Work, Mom's place" />
-                    </label>
-                    <label className="checkout-input-row">
-                      <span>Address</span>
-                      <input type="text" value={addressDraft.line1} onChange={(event) => setAddressDraft((current) => ({ ...current, line1: event.target.value }))} placeholder="1234 Main St, Vancouver, BC" />
-                    </label>
-                    <label className="checkout-input-row">
-                      <span>Delivery notes</span>
-                      <input type="text" value={addressDraft.instructions} onChange={(event) => setAddressDraft((current) => ({ ...current, instructions: event.target.value }))} placeholder="Buzz 204, leave at concierge" />
-                    </label>
-                    <button type="button" className="pill active" onClick={addProfileAddress} disabled={uiState.updating || !addressDraft.label.trim() || !addressDraft.line1.trim()}>Save address</button>
-                  </div>
-                </div>
-
-                <div className="profile-stack-block">
-                  <div className="section-head-simple">
-                    <strong>Saved cards</strong>
-                    <span>{customerProfile.cards.length ? 'Fast checkout ready' : 'Add your first card'}</span>
-                  </div>
-                  {customerProfile.cards.map((card) => (
-                    <button key={card.id} type="button" className="profile-saved-row" onClick={() => setPaymentCard({ brand: card.brand, last4: card.last4, name: card.name })}>
-                      <div>
-                        <strong>{card.brand} •••• {card.last4}</strong>
-                        <span>{card.name}</span>
-                      </div>
-                      <em>Use</em>
-                    </button>
-                  ))}
-                  <div className="profile-form-grid compact">
-                    <label className="checkout-input-row">
-                      <span>Brand</span>
-                      <select value={cardDraft.brand} onChange={(event) => setCardDraft((current) => ({ ...current, brand: event.target.value }))}>
-                        <option value="Visa">Visa</option>
-                        <option value="Mastercard">Mastercard</option>
-                        <option value="Amex">Amex</option>
-                      </select>
-                    </label>
-                    <label className="checkout-input-row">
-                      <span>Last 4</span>
-                      <input type="text" value={cardDraft.last4} maxLength={4} onChange={(event) => setCardDraft((current) => ({ ...current, last4: event.target.value.replace(/\D/g, '').slice(0, 4) }))} placeholder="4242" />
-                    </label>
-                    <label className="checkout-input-row">
-                      <span>Name on card</span>
-                      <input type="text" value={cardDraft.name} onChange={(event) => setCardDraft((current) => ({ ...current, name: event.target.value }))} placeholder="Emma Johnson" />
-                    </label>
-                    <button type="button" className="pill active" onClick={addProfileCard} disabled={uiState.updating || !cardDraft.name.trim() || cardDraft.last4.length !== 4}>Save card</button>
-                  </div>
-                </div>
-              </>}
-
-              {profileSection === 'orders' && <>
-                <div className="editor-head">
+                  <em>›</em>
+                </button>
+                <button type="button" className="cleaner-profile-row" onClick={() => setProfileSection('email')}>
                   <div>
-                    <span className="label">Orders</span>
-                    <strong>Current and past</strong>
+                    <strong>Email</strong>
+                    <span>{customerProfile.email}</span>
                   </div>
-                  <span className="mini-note">Uber-style flow</span>
-                </div>
-                <div className="list-row"><span>Items in cart</span><strong>{cartItemCount}</strong></div>
-                <div className="list-row"><span>Order history</span><strong>{customerOrders.length}</strong></div>
-                <div className="list-row"><span>Latest order</span><strong>{customerOrderSummary}</strong></div>
-                {latestPlacedOrder ? <div className="list-row"><span>Last payment</span><strong>{latestPlacedOrder.card.brand} •••• {latestPlacedOrder.card.last4}</strong></div> : null}
-                <div className="profile-stack-block">
-                  {(customerOrders.slice(0, 5)).map((order) => (
-                    <div key={order.id} className="profile-saved-row static">
-                      <div>
-                        <strong>{order.shop?.name || order.shopId || 'Cake order'}</strong>
-                        <span>{formatStatus(order.fulfillment)} · ${Number(order.total || 0).toFixed(2)}</span>
-                      </div>
-                      <em>{formatStatus(order.status)}</em>
+                  <em>›</em>
+                </button>
+                <button type="button" className="cleaner-profile-row" onClick={() => setProfileSection('addresses')}>
+                  <div>
+                    <strong>Addresses</strong>
+                    <span>{customerProfile.addresses.length ? `${customerProfile.addresses.length} saved` : 'Add your first address'}</span>
+                  </div>
+                  <em>›</em>
+                </button>
+                <button type="button" className="cleaner-profile-row" onClick={() => setProfileSection('payments')}>
+                  <div>
+                    <strong>Payment methods</strong>
+                    <span>{customerProfile.cards.length ? `${customerProfile.cards.length} saved` : 'Add your first card'}</span>
+                  </div>
+                  <em>›</em>
+                </button>
+                <button type="button" className="cleaner-profile-row" onClick={() => setProfileSection('orders')}>
+                  <div>
+                    <strong>Orders</strong>
+                    <span>{cartItemCount ? `${cartItemCount} in cart` : `${customerOrders.length} past orders`}</span>
+                  </div>
+                  <em>›</em>
+                </button>
+                <button type="button" className="cleaner-profile-row" onClick={() => setProfileSection('saved')}>
+                  <div>
+                    <strong>Saved cakes</strong>
+                    <span>{savedDesigns.length ? `${savedDesigns.length} saved` : 'No saved cakes yet'}</span>
+                  </div>
+                  <em>›</em>
+                </button>
+                <button type="button" className="cleaner-profile-row" onClick={() => setProfileSection('settings')}>
+                  <div>
+                    <strong>Settings</strong>
+                    <span>Notifications and checkout preferences</span>
+                  </div>
+                  <em>›</em>
+                </button>
+                <button type="button" className="cleaner-profile-row" onClick={() => setProfileSection('help')}>
+                  <div>
+                    <strong>Help</strong>
+                    <span>Support, pickup, refunds</span>
+                  </div>
+                  <em>›</em>
+                </button>
+                <button type="button" className="cleaner-profile-row" onClick={() => setProfileSection('security')}>
+                  <div>
+                    <strong>Logout</strong>
+                    <span>{authTokens.customer ? 'Signed in' : 'Reconnect your account'}</span>
+                  </div>
+                  <em>›</em>
+                </button>
+              </div>
+            )}
+
+            {profileSection === 'details' && <div className="list-card profile-detail-card cleaner-profile-detail-card">
+              <div className="cleaner-profile-subhead">
+                <button type="button" className="pill" onClick={() => setProfileSection('profile')}>Back</button>
+                <strong>Full name</strong>
+              </div>
+              <div className="list-row"><span>Name</span><strong>{customerProfile.fullName}</strong></div>
+            </div>}
+
+            {profileSection === 'email' && <div className="list-card profile-detail-card cleaner-profile-detail-card">
+              <div className="cleaner-profile-subhead">
+                <button type="button" className="pill" onClick={() => setProfileSection('profile')}>Back</button>
+                <strong>Email</strong>
+              </div>
+              <div className="list-row"><span>Primary email</span><strong>{customerProfile.email}</strong></div>
+            </div>}
+
+            {profileSection === 'addresses' && <div className="list-card profile-detail-card cleaner-profile-detail-card">
+              <div className="cleaner-profile-subhead">
+                <button type="button" className="pill" onClick={() => setProfileSection('profile')}>Back</button>
+                <strong>Addresses</strong>
+              </div>
+              {customerProfile.addresses.map((address) => (
+                <button key={address.id} type="button" className={selectedAddressId === address.id ? 'profile-saved-row active' : 'profile-saved-row'} onClick={() => setSelectedAddressId(address.id)}>
+                  <div>
+                    <strong>{address.label}</strong>
+                    <span>{address.line1}</span>
+                  </div>
+                  <em>{selectedAddressId === address.id ? 'Selected' : 'Use'}</em>
+                </button>
+              ))}
+              <div className="profile-form-grid">
+                <label className="checkout-input-row">
+                  <span>Label</span>
+                  <input type="text" value={addressDraft.label} onChange={(event) => setAddressDraft((current) => ({ ...current, label: event.target.value }))} placeholder="Home, Work, Mom's place" />
+                </label>
+                <label className="checkout-input-row">
+                  <span>Address</span>
+                  <input type="text" value={addressDraft.line1} onChange={(event) => setAddressDraft((current) => ({ ...current, line1: event.target.value }))} placeholder="1234 Main St, Vancouver, BC" />
+                </label>
+                <label className="checkout-input-row">
+                  <span>Delivery notes</span>
+                  <input type="text" value={addressDraft.instructions} onChange={(event) => setAddressDraft((current) => ({ ...current, instructions: event.target.value }))} placeholder="Buzz 204, leave at concierge" />
+                </label>
+                <button type="button" className="pill active" onClick={addProfileAddress} disabled={uiState.updating || !addressDraft.label.trim() || !addressDraft.line1.trim()}>Save address</button>
+              </div>
+            </div>}
+
+            {profileSection === 'payments' && <div className="list-card profile-detail-card cleaner-profile-detail-card">
+              <div className="cleaner-profile-subhead">
+                <button type="button" className="pill" onClick={() => setProfileSection('profile')}>Back</button>
+                <strong>Payment methods</strong>
+              </div>
+              {customerProfile.cards.map((card) => (
+                <button key={card.id} type="button" className="profile-saved-row" onClick={() => setPaymentCard({ brand: card.brand, last4: card.last4, name: card.name })}>
+                  <div>
+                    <strong>{card.brand} •••• {card.last4}</strong>
+                    <span>{card.name}</span>
+                  </div>
+                  <em>Use</em>
+                </button>
+              ))}
+              <div className="profile-form-grid compact">
+                <label className="checkout-input-row">
+                  <span>Brand</span>
+                  <select value={cardDraft.brand} onChange={(event) => setCardDraft((current) => ({ ...current, brand: event.target.value }))}>
+                    <option value="Visa">Visa</option>
+                    <option value="Mastercard">Mastercard</option>
+                    <option value="Amex">Amex</option>
+                  </select>
+                </label>
+                <label className="checkout-input-row">
+                  <span>Last 4</span>
+                  <input type="text" value={cardDraft.last4} maxLength={4} onChange={(event) => setCardDraft((current) => ({ ...current, last4: event.target.value.replace(/\D/g, '').slice(0, 4) }))} placeholder="4242" />
+                </label>
+                <label className="checkout-input-row">
+                  <span>Name on card</span>
+                  <input type="text" value={cardDraft.name} onChange={(event) => setCardDraft((current) => ({ ...current, name: event.target.value }))} placeholder="Emma Johnson" />
+                </label>
+                <button type="button" className="pill active" onClick={addProfileCard} disabled={uiState.updating || !cardDraft.name.trim() || cardDraft.last4.length !== 4}>Save card</button>
+              </div>
+            </div>}
+
+            {profileSection === 'orders' && <div className="list-card profile-detail-card cleaner-profile-detail-card">
+              <div className="cleaner-profile-subhead">
+                <button type="button" className="pill" onClick={() => setProfileSection('profile')}>Back</button>
+                <strong>Orders</strong>
+              </div>
+              <div className="list-row"><span>Items in cart</span><strong>{cartItemCount}</strong></div>
+              <div className="list-row"><span>Order history</span><strong>{customerOrders.length}</strong></div>
+              <div className="list-row"><span>Latest order</span><strong>{customerOrderSummary}</strong></div>
+              {latestPlacedOrder ? <div className="list-row"><span>Last payment</span><strong>{latestPlacedOrder.card.brand} •••• {latestPlacedOrder.card.last4}</strong></div> : null}
+              <div className="profile-stack-block">
+                {(customerOrders.slice(0, 5)).map((order) => (
+                  <div key={order.id} className="profile-saved-row static">
+                    <div>
+                      <strong>{order.shop?.name || order.shopId || 'Cake order'}</strong>
+                      <span>{formatStatus(order.fulfillment)} · ${Number(order.total || 0).toFixed(2)}</span>
                     </div>
-                  ))}
-                  {!customerOrders.length ? <p className="mini-note">No past orders yet.</p> : null}
-                </div>
-                <div className="pill-row">
-                  <button type="button" className="pill active" onClick={() => setView('saved')}>Open orders</button>
-                </div>
-              </>}
-
-              {profileSection === 'saved' && <>
-                <div className="editor-head">
-                  <div>
-                    <span className="label">Saved cakes</span>
-                    <strong>Favorites and past builds</strong>
+                    <em>{formatStatus(order.status)}</em>
                   </div>
-                  <span className="mini-note">Quick reorder</span>
-                </div>
-                {sortedSavedDesigns.slice(0, 4).map((design) => (
-                  <div key={design.id} className="list-row"><span>{design.title}</span><strong>{formatMoney(design.estimatedTotal || totalPrice)}</strong></div>
                 ))}
-                {!sortedSavedDesigns.length ? <p className="mini-note">No saved cakes yet.</p> : null}
-              </>}
+                {!customerOrders.length ? <p className="mini-note">No past orders yet.</p> : null}
+              </div>
+              <div className="pill-row">
+                <button type="button" className="pill active" onClick={() => setView('saved')}>Open orders</button>
+              </div>
+            </div>}
 
-              {profileSection === 'settings' && <>
-                <div className="editor-head">
-                  <div>
-                    <span className="label">Settings</span>
-                    <strong>Customer preferences</strong>
-                  </div>
-                  <span className="mini-note">Simple</span>
-                </div>
-                <div className="list-row"><span>Notifications</span><strong>Order updates and promos</strong></div>
-                <div className="list-row"><span>Fulfillment preferences</span><strong>{fulfillmentType === 'delivery' ? 'Delivery-first checkout' : 'Pickup-first checkout'}</strong></div>
-                <div className="list-row"><span>Accessibility</span><strong>Readable text and comfort</strong></div>
-              </>}
+            {profileSection === 'saved' && <div className="list-card profile-detail-card cleaner-profile-detail-card">
+              <div className="cleaner-profile-subhead">
+                <button type="button" className="pill" onClick={() => setProfileSection('profile')}>Back</button>
+                <strong>Saved cakes</strong>
+              </div>
+              {sortedSavedDesigns.slice(0, 4).map((design) => (
+                <div key={design.id} className="list-row"><span>{design.title}</span><strong>{formatMoney(design.estimatedTotal || totalPrice)}</strong></div>
+              ))}
+              {!sortedSavedDesigns.length ? <p className="mini-note">No saved cakes yet.</p> : null}
+            </div>}
 
-              {profileSection === 'help' && <>
-                <div className="editor-head">
-                  <div>
-                    <span className="label">Help</span>
-                    <strong>Customer support</strong>
-                  </div>
-                  <span className="mini-note">Support</span>
-                </div>
-                {helpActions.map((item) => (
-                  <div key={item} className="list-row"><span>{item}</span><strong>Available</strong></div>
-                ))}
-              </>}
+            {profileSection === 'settings' && <div className="list-card profile-detail-card cleaner-profile-detail-card">
+              <div className="cleaner-profile-subhead">
+                <button type="button" className="pill" onClick={() => setProfileSection('profile')}>Back</button>
+                <strong>Settings</strong>
+              </div>
+              <div className="list-row"><span>Notifications</span><strong>Order updates and promos</strong></div>
+              <div className="list-row"><span>Fulfillment preferences</span><strong>{fulfillmentType === 'delivery' ? 'Delivery-first checkout' : 'Pickup-first checkout'}</strong></div>
+              <div className="list-row"><span>Accessibility</span><strong>Readable text and comfort</strong></div>
+            </div>}
 
-              {profileSection === 'security' && <>
-                <div className="editor-head">
-                  <div>
-                    <span className="label">Logout</span>
-                    <strong>Account access</strong>
-                  </div>
-                  <span className="mini-note">Session</span>
-                </div>
-                <div className="list-row"><span>Status</span><strong>{authTokens.customer ? 'Connected' : 'Needs reconnect'}</strong></div>
-                <div className="list-row"><span>Device</span><strong>{sessionMeta.customer?.deviceLabel || 'This browser'}</strong></div>
-                <div className="pill-row">
-                  {authTokens.customer ? (
-                    <button type="button" className="pill active" onClick={handleCustomerLogout} disabled={uiState.authUpdating}>{uiState.authUpdating ? 'Logging out...' : 'Logout'}</button>
-                  ) : (
-                    <button type="button" className="pill active" onClick={() => toggleDemoSession('customer')} disabled={uiState.authUpdating}>{uiState.authUpdating ? 'Reconnecting...' : 'Reconnect'}</button>
-                  )}
-                </div>
-              </>}
-            </div>
+            {profileSection === 'help' && <div className="list-card profile-detail-card cleaner-profile-detail-card">
+              <div className="cleaner-profile-subhead">
+                <button type="button" className="pill" onClick={() => setProfileSection('profile')}>Back</button>
+                <strong>Help</strong>
+              </div>
+              {helpActions.map((item) => (
+                <div key={item} className="list-row"><span>{item}</span><strong>Available</strong></div>
+              ))}
+            </div>}
+
+            {profileSection === 'security' && <div className="list-card profile-detail-card cleaner-profile-detail-card">
+              <div className="cleaner-profile-subhead">
+                <button type="button" className="pill" onClick={() => setProfileSection('profile')}>Back</button>
+                <strong>Logout</strong>
+              </div>
+              <div className="list-row"><span>Status</span><strong>{authTokens.customer ? 'Connected' : 'Needs reconnect'}</strong></div>
+              <div className="list-row"><span>Device</span><strong>{sessionMeta.customer?.deviceLabel || 'This browser'}</strong></div>
+              <div className="pill-row">
+                {authTokens.customer ? (
+                  <button type="button" className="pill active" onClick={handleCustomerLogout} disabled={uiState.authUpdating}>{uiState.authUpdating ? 'Logging out...' : 'Logout'}</button>
+                ) : (
+                  <button type="button" className="pill active" onClick={() => toggleDemoSession('customer')} disabled={uiState.authUpdating}>{uiState.authUpdating ? 'Reconnecting...' : 'Reconnect'}</button>
+                )}
+              </div>
+            </div>}
           </section>
         )}
 

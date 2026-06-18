@@ -1126,10 +1126,11 @@ html {
 }
 
 .profile-menu-screen {
-  gap: 18px;
+  gap: 14px;
 }
 
-.profile-menu-head {
+.profile-menu-head,
+.cleaner-profile-head {
   display: grid;
   gap: 6px;
 }
@@ -1179,6 +1180,55 @@ html {
 .profile-detail-card {
   display: grid;
   gap: 12px;
+}
+
+.cleaner-profile-list {
+  padding: 0;
+  overflow: hidden;
+}
+
+.cleaner-profile-row {
+  width: 100%;
+  border: 0;
+  background: #fff;
+  color: #241b16;
+  padding: 16px;
+  text-align: left;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 14px;
+  border-bottom: 1px solid #f0e4dc;
+}
+
+.cleaner-profile-row:last-child {
+  border-bottom: 0;
+}
+
+.cleaner-profile-row div {
+  display: grid;
+  gap: 3px;
+}
+
+.cleaner-profile-row strong {
+  font-size: 0.98rem;
+}
+
+.cleaner-profile-row span,
+.cleaner-profile-row em {
+  color: #7a655b;
+  font-size: 0.84rem;
+  font-style: normal;
+}
+
+.cleaner-profile-detail-card {
+  gap: 14px;
+}
+
+.cleaner-profile-subhead {
+  display: flex;
+  align-items: center;
+  gap: 10px;
 }
 
 .minimal-builder-title {
