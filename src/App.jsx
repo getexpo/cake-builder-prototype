@@ -571,7 +571,7 @@ function App() {
           role: 'customer',
         },
       }))
-      setView('accounts')
+      setView('home')
       setProfileSection('profile')
       setUiState((current) => ({ ...current, error: '' }))
     })
@@ -588,7 +588,7 @@ function App() {
             role: 'customer',
           },
         }))
-        setView('accounts')
+        setView('home')
         setProfileSection('profile')
         setUiState((current) => ({ ...current, error: '' }))
         return
@@ -1615,7 +1615,7 @@ function App() {
       await signInDemoRole(role, { message: `${role} demo session reconnected.` })
       if (role === 'customer') {
         setGuestMode(false)
-        setView('accounts')
+        setView('home')
       }
       setUiState((current) => ({ ...current, authUpdating: false }))
     } catch (error) {
