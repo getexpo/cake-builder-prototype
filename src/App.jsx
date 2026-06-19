@@ -561,6 +561,7 @@ function App() {
     supabase.auth.getSession().then(({ data }) => {
       const session = data.session
       if (!session?.user) return
+      setDesiredDemoRoles((current) => ({ ...current, customer: true }))
       setAuthTokens((current) => ({ ...current, customer: `supabase:${session.access_token}` }))
       setAccountSessions((current) => ({
         ...current,
@@ -577,6 +578,7 @@ function App() {
 
     const { data: listener } = supabase.auth.onAuthStateChange((_event, session) => {
       if (session?.user) {
+        setDesiredDemoRoles((current) => ({ ...current, customer: true }))
         setAuthTokens((current) => ({ ...current, customer: `supabase:${session.access_token}` }))
         setAccountSessions((current) => ({
           ...current,
@@ -592,6 +594,7 @@ function App() {
         return
       }
 
+      setDesiredDemoRoles((current) => ({ ...current, customer: false }))
       setAuthTokens((current) => ({ ...current, customer: '' }))
       setAccountSessions((current) => ({ ...current, customer: null }))
       setView('auth')
