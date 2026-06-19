@@ -570,6 +570,9 @@ function App() {
           role: 'customer',
         },
       }))
+      setView('accounts')
+      setProfileSection('profile')
+      setUiState((current) => ({ ...current, error: '' }))
     })
 
     const { data: listener } = supabase.auth.onAuthStateChange((_event, session) => {
@@ -583,11 +586,15 @@ function App() {
             role: 'customer',
           },
         }))
+        setView('accounts')
+        setProfileSection('profile')
+        setUiState((current) => ({ ...current, error: '' }))
         return
       }
 
       setAuthTokens((current) => ({ ...current, customer: '' }))
       setAccountSessions((current) => ({ ...current, customer: null }))
+      setView('auth')
     })
 
     return () => listener.subscription.unsubscribe()
