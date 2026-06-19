@@ -2647,21 +2647,29 @@ function App() {
                   <em>{selectedAddressId === address.id ? 'Selected' : 'Use'}</em>
                 </button>
               ))}
-              <div className="profile-form-grid">
-                <label className="checkout-input-row">
-                  <span>Label</span>
-                  <input type="text" value={addressDraft.label} onChange={(event) => setAddressDraft((current) => ({ ...current, label: event.target.value }))} placeholder="Home, Work, Mom's place" />
-                </label>
-                <label className="checkout-input-row">
-                  <span>Delivery address</span>
-                  <input type="text" value={addressDraft.line1} onChange={(event) => setAddressDraft((current) => ({ ...current, line1: event.target.value }))} placeholder="1234 Main St, Vancouver, BC" />
-                </label>
-                <label className="checkout-input-row">
-                  <span>Delivery notes</span>
-                  <input type="text" value={addressDraft.instructions} onChange={(event) => setAddressDraft((current) => ({ ...current, instructions: event.target.value }))} placeholder="Buzz 204, leave at concierge" />
-                </label>
-                <button type="button" className="pill active" onClick={addProfileAddress} disabled={uiState.updating || !addressDraft.label.trim() || !addressDraft.line1.trim()}>Save address</button>
-              </div>
+              {authTokens.customer ? (
+                <div className="profile-form-grid">
+                  <label className="checkout-input-row">
+                    <span>Label</span>
+                    <input type="text" value={addressDraft.label} onChange={(event) => setAddressDraft((current) => ({ ...current, label: event.target.value }))} placeholder="Home, Work, Mom's place" />
+                  </label>
+                  <label className="checkout-input-row">
+                    <span>Delivery address</span>
+                    <input type="text" value={addressDraft.line1} onChange={(event) => setAddressDraft((current) => ({ ...current, line1: event.target.value }))} placeholder="1234 Main St, Vancouver, BC" />
+                  </label>
+                  <label className="checkout-input-row">
+                    <span>Delivery notes</span>
+                    <input type="text" value={addressDraft.instructions} onChange={(event) => setAddressDraft((current) => ({ ...current, instructions: event.target.value }))} placeholder="Buzz 204, leave at concierge" />
+                  </label>
+                  <button type="button" className="pill active" onClick={addProfileAddress} disabled={uiState.updating || !addressDraft.label.trim() || !addressDraft.line1.trim()}>Save address</button>
+                </div>
+              ) : (
+                <div className="profile-form-grid blocked-auth-panel">
+                  <button type="button" className="cta polished-primary-cta" onClick={() => toggleDemoSession('customer')} disabled={uiState.authUpdating}>
+                    {uiState.authUpdating ? 'Signing in...' : 'Sign in to save address'}
+                  </button>
+                </div>
+              )}
             </div>}
 
             {profileSection === 'payments' && <div className="list-card profile-detail-card cleaner-profile-detail-card">
@@ -2689,25 +2697,33 @@ function App() {
                   <em>Use</em>
                 </button>
               ))}
-              <div className="profile-form-grid compact">
-                <label className="checkout-input-row">
-                  <span>Brand</span>
-                  <select value={cardDraft.brand} onChange={(event) => setCardDraft((current) => ({ ...current, brand: event.target.value }))}>
-                    <option value="Visa">Visa</option>
-                    <option value="Mastercard">Mastercard</option>
-                    <option value="Amex">Amex</option>
-                  </select>
-                </label>
-                <label className="checkout-input-row">
-                  <span>Last 4</span>
-                  <input type="text" value={cardDraft.last4} maxLength={4} onChange={(event) => setCardDraft((current) => ({ ...current, last4: event.target.value.replace(/\D/g, '').slice(0, 4) }))} placeholder="4242" />
-                </label>
-                <label className="checkout-input-row">
-                  <span>Name on card</span>
-                  <input type="text" value={cardDraft.name} onChange={(event) => setCardDraft((current) => ({ ...current, name: event.target.value }))} placeholder="Emma Johnson" />
-                </label>
-                <button type="button" className="pill active" onClick={addProfileCard} disabled={uiState.updating || !cardDraft.name.trim() || cardDraft.last4.length !== 4}>Save card</button>
-              </div>
+              {authTokens.customer ? (
+                <div className="profile-form-grid compact">
+                  <label className="checkout-input-row">
+                    <span>Brand</span>
+                    <select value={cardDraft.brand} onChange={(event) => setCardDraft((current) => ({ ...current, brand: event.target.value }))}>
+                      <option value="Visa">Visa</option>
+                      <option value="Mastercard">Mastercard</option>
+                      <option value="Amex">Amex</option>
+                    </select>
+                  </label>
+                  <label className="checkout-input-row">
+                    <span>Last 4</span>
+                    <input type="text" value={cardDraft.last4} maxLength={4} onChange={(event) => setCardDraft((current) => ({ ...current, last4: event.target.value.replace(/\D/g, '').slice(0, 4) }))} placeholder="4242" />
+                  </label>
+                  <label className="checkout-input-row">
+                    <span>Name on card</span>
+                    <input type="text" value={cardDraft.name} onChange={(event) => setCardDraft((current) => ({ ...current, name: event.target.value }))} placeholder="Emma Johnson" />
+                  </label>
+                  <button type="button" className="pill active" onClick={addProfileCard} disabled={uiState.updating || !cardDraft.name.trim() || cardDraft.last4.length !== 4}>Save card</button>
+                </div>
+              ) : (
+                <div className="profile-form-grid blocked-auth-panel">
+                  <button type="button" className="cta polished-primary-cta" onClick={() => toggleDemoSession('customer')} disabled={uiState.authUpdating}>
+                    {uiState.authUpdating ? 'Signing in...' : 'Sign in to save card'}
+                  </button>
+                </div>
+              )}
             </div>}
 
             {profileSection === 'orders' && <div className="list-card profile-detail-card cleaner-profile-detail-card">

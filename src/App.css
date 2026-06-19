@@ -1325,6 +1325,14 @@ html {
   align-items: end;
 }
 
+.blocked-auth-panel {
+  margin-top: 4px;
+}
+
+.blocked-auth-panel .cta {
+  width: 100%;
+}
+
 .dual-action-footer {
   display: grid;
   grid-template-columns: 1fr 1.4fr;
