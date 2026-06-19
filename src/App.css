@@ -2517,12 +2517,20 @@ html {
     padding: 0;
   }
 
-  .store-menu-grid {
-    grid-template-columns: repeat(2, minmax(0, 1fr));
+  .store-menu-grid,
+  .polished-store-menu-grid {
+    grid-template-columns: 1fr;
   }
 
   .uber-cart-item-row {
-    grid-template-columns: 1fr;
+    grid-template-columns: 60px minmax(0, 1fr);
+    align-items: start;
+  }
+
+  .uber-cart-stepper {
+    grid-column: 2;
+    justify-self: start;
+    margin-top: 4px;
   }
 
   .uber-orders-card-top {
@@ -2535,8 +2543,23 @@ html {
     justify-self: stretch;
   }
 
-  .store-cart-actions {
+  .store-cart-actions,
+  .dual-action-footer {
     grid-template-columns: 1fr;
+  }
+
+  .store-hero-meta,
+  .builder-progress-steps,
+  .flow-step-tabs,
+  .layer-selector-row,
+  .grid-cards,
+  .dual-actions,
+  .triple-on-mobile {
+    grid-template-columns: 1fr 1fr;
+  }
+
+  .builder-progress-steps {
+    gap: 10px;
   }
 
   .phone-frame {
@@ -2545,14 +2568,6 @@ html {
     border-radius: 0;
     border-left: 0;
     border-right: 0;
-  }
-
-  .flow-step-tabs,
-  .layer-selector-row,
-  .grid-cards,
-  .dual-actions,
-  .triple-on-mobile {
-    grid-template-columns: 1fr 1fr;
   }
 
   .triple-on-mobile {

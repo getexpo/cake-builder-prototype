@@ -2555,31 +2555,142 @@ function App() {
                 </div>
               )}
 
-              {builderScreen === 'custom-builder' && <div className="customer-visual-card focused-visual-card solo-visual-card">
-                <div className="visual-copy compact-visual-copy">
-                  <span className="label">Live cake</span>
-                  <strong>{previewTitle}</strong>
+              {builderScreen === 'custom-builder' && (
+                <div className="builder-polish-shell">
+                  <div className="builder-progress-card">
+                    <div className="builder-progress-copy">
+                      <span className="label">Custom cake builder</span>
+                      <strong>{previewTitle}</strong>
+                      <p>Go step by step, then review before adding it to cart.</p>
+                    </div>
+
+                    <div className="builder-progress-steps">
+                      {builderSteps.map((step, index) => {
+                        const activeStep = builderStep === step.id
+                        const completedStep = builderStepIndex > index
+                        return (
+                          <button
+                            key={step.id}
+                            type="button"
+                            className={activeStep ? 'builder-step-chip active' : completedStep ? 'builder-step-chip complete' : 'builder-step-chip'}
+                            onClick={() => {
+                              setBuilderStep(step.id)
+                              setBuilderMenuOpen(true)
+                            }}
+                          >
+                            <strong>{index + 1}</strong>
+                            <span>{step.label}</span>
+                          </button>
+                        )
+                      })}
+                    </div>
+                  </div>
+
+                  <div className="customer-visual-card focused-visual-card solo-visual-card polished-builder-preview">
+                    <div className="visual-copy compact-visual-copy polished-builder-copy">
+                      <span className="label">Live preview</span>
+                      <strong>{previewTitle}</strong>
+                      <p>{layerCount} layers · {mode === 'advanced' ? 'Full custom' : 'Quick build'} · {formatMoney(totalPrice)}</p>
+                    </div>
+
+                    <div className={`cake-preview mobile-preview ${cakeType}`}>
+                      {visibleLayers.map((layer, reverseIndex) => {
+                        const actualIndex = layerCount - 1 - reverseIndex
+                        const width = Math.max(130, 248 - reverseIndex * 12)
+                        const height = cakeType === 'tall' ? 58 : cakeType === 'premium' ? 50 : 42
+                        return (
+                          <button
+                            key={layer.id}
+                            type="button"
+                            className={activeLayer === actualIndex ? 'cake-layer active polished-cake-layer' : 'cake-layer polished-cake-layer'}
+                            style={{ width: `${width}px`, height: `${height}px` }}
+                            onClick={() => {
+                              setActiveLayer(actualIndex)
+                              setBuilderStep('flavor')
+                              setBuilderMenuOpen(true)
+                            }}
+                          >
+                            <span>{actualIndex === 0 ? 'Top' : actualIndex === layerCount - 1 ? 'Base' : `Layer ${actualIndex + 1}`}</span>
+                          </button>
+                        )
+                      })}
+                    </div>
+                  </div>
+
+                  <div className="builder-summary-card">
+                    <div className="section-head-simple">
+                      <strong>Build summary</strong>
+                      <span>{formatMoney(totalPrice)}</span>
+                    </div>
+
+                    <div className="builder-summary-grid">
+                      <div className="builder-summary-row">
+                        <span>Occasion</span>
+                        <strong>{occasion}</strong>
+                      </div>
+                      <div className="builder-summary-row">
+                        <span>Bakery</span>
+                        <strong>{selectedBakery?.name || customerShopLabel}</strong>
+                      </div>
+                      <div className="builder-summary-row">
+                        <span>Shape</span>
+                        <strong>{cakeTypes.find((type) => type.id === cakeType)?.label || cakeType}</strong>
+                      </div>
+                      <div className="builder-summary-row">
+                        <span>Build mode</span>
+                        <strong>{mode === 'advanced' ? 'Full custom' : 'Quick build'}</strong>
+                      </div>
+                    </div>
+                  </div>
+
+                  <div className="builder-layer-panel">
+                    <div className="section-head-simple">
+                      <strong>Layer details</strong>
+                      <span>Tap a layer to edit it</span>
+                    </div>
+
+                    <div className="builder-layer-list">
+                      {layers.map((layer, index) => (
+                        <button
+                          key={layer.id}
+                          type="button"
+                          className={activeLayer === index ? 'builder-layer-row active' : 'builder-layer-row'}
+                          onClick={() => {
+                            setActiveLayer(index)
+                            setBuilderStep('flavor')
+                            setBuilderMenuOpen(true)
+                          }}
+                        >
+                          <div>
+                            <strong>{layer.name}</strong>
+                            <span>{layer.flavor} · {layer.cream}</span>
+                          </div>
+                          <em>Edit</em>
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+
+                  <div className="builder-action-bar polished-builder-actions">
+                    <button type="button" className="cta secondary" onClick={saveCurrentDesign}>
+                      Save design
+                    </button>
+                    <button type="button" className="cta add-cart-cta polished-primary-cta" onClick={addToCart}>
+                      Add to cart
+                    </button>
+                    <button
+                      type="button"
+                      className="cta secondary"
+                      onClick={() => {
+                        setSelectedCartShopId(customerShopId)
+                        setView('checkout')
+                      }}
+                    >
+                      View cart
+                    </button>
+                  </div>
                 </div>
-                <div className={`cake-preview mobile-preview ${cakeType}`}>
-                  {visibleLayers.map((layer, reverseIndex) => {
-                    const actualIndex = layerCount - 1 - reverseIndex
-                    const width = Math.max(130, 248 - reverseIndex * 12)
-                    const height = cakeType === 'tall' ? 58 : cakeType === 'premium' ? 50 : 42
-                    return (
-                      <button key={layer.id} type="button" className={activeLayer === actualIndex ? 'cake-layer active' : 'cake-layer'} style={{ width: `${width}px`, height: `${height}px` }} onClick={() => { setActiveLayer(actualIndex); setBuilderStep('flavor'); setBuilderMenuOpen(true) }}>
-                        <span>{actualIndex === 0 ? 'Top' : actualIndex === layerCount - 1 ? 'Base' : `Layer ${actualIndex + 1}`}</span>
-                      </button>
-                    )
-                  })}
-                </div>
-                <div className="builder-action-bar">
-                  <button type="button" className="cta add-cart-cta" onClick={addToCart}>Add to cart</button>
-                  <button type="button" className="cta secondary" onClick={() => {
-                    setSelectedCartShopId(customerShopId)
-                    setView('checkout')
-                  }}>View cart</button>
-                </div>
-              </div>}
+              )}
 
             </section>
           </>
@@ -2724,26 +2835,35 @@ function App() {
 
             {checkoutStage === 'payment' && (
               <>
-                <div className="uber-cart-title-block compact-cart-title-block">
-                  <h2>Payment</h2>
-                  <p>Add a card and confirm your order.</p>
+                <div className="checkout-top-hero">
+                  <div>
+                    <span className="label">Checkout</span>
+                    <h2>Payment</h2>
+                    <p>Confirm the handoff details, then place the order cleanly.</p>
+                  </div>
                 </div>
 
-                <div className="checkout-payment-card">
+                <div className="checkout-payment-card polished-payment-card">
                   <div className="section-head-simple">
                     <strong>Payment method</strong>
                     <span>{paymentCard.brand}</span>
                   </div>
-                  <div className="checkout-profile-mini-card">
+
+                  <div className="checkout-profile-mini-card polished-profile-mini-card">
                     <strong>{customerProfile.fullName || 'No account name saved yet'}</strong>
                     <span>{customerProfile.email || 'Add an email in Account'}</span>
                   </div>
+
                   {fulfillmentType === 'delivery' ? (
                     <label className="checkout-input-row">
                       <span>Delivery address</span>
                       <select value={selectedAddressId} onChange={(event) => setSelectedAddressId(event.target.value)}>
                         <option value="">Choose an address</option>
-                        {customerProfile.addresses.map((address) => <option key={address.id} value={address.id}>{address.label} · {address.line1}</option>)}
+                        {customerProfile.addresses.map((address) => (
+                          <option key={address.id} value={address.id}>
+                            {address.label} · {address.line1}
+                          </option>
+                        ))}
                       </select>
                     </label>
                   ) : (
@@ -2753,41 +2873,85 @@ function App() {
                       <p>{activeCartGroup?.shopName || checkoutShopLabel}</p>
                     </div>
                   )}
-                  <label className="checkout-input-row">
-                    <span>Name on card</span>
-                    <input type="text" value={paymentCard.name} placeholder="Enter the cardholder name" onChange={(event) => setPaymentCard((current) => ({ ...current, name: event.target.value }))} />
-                  </label>
-                  <label className="checkout-input-row">
-                    <span>Card ending in</span>
-                    <input type="text" value={paymentCard.last4} placeholder="Last 4 digits" maxLength={4} onChange={(event) => setPaymentCard((current) => ({ ...current, last4: event.target.value.replace(/\D/g, '').slice(0, 4) }))} />
-                  </label>
+
+                  <div className="checkout-card-form-grid">
+                    <label className="checkout-input-row">
+                      <span>Name on card</span>
+                      <input
+                        type="text"
+                        value={paymentCard.name}
+                        placeholder="Enter the cardholder name"
+                        onChange={(event) => setPaymentCard((current) => ({ ...current, name: event.target.value }))}
+                      />
+                    </label>
+
+                    <label className="checkout-input-row">
+                      <span>Last 4 digits</span>
+                      <input
+                        type="text"
+                        value={paymentCard.last4}
+                        placeholder="Last 4 digits"
+                        maxLength={4}
+                        onChange={(event) => setPaymentCard((current) => ({ ...current, last4: event.target.value.replace(/\D/g, '').slice(0, 4) }))}
+                      />
+                    </label>
+                  </div>
+
                   {!!customerProfile.cards.length && (
-                    <div className="saved-cards-stack">
-                      {customerProfile.cards.map((card) => <button key={card.id} type="button" className="saved-card-chip" onClick={() => setPaymentCard({ name: card.name, last4: card.last4, brand: card.brand })}>{card.brand} •••• {card.last4}</button>)}
+                    <div className="saved-payment-section">
+                      <div className="section-head-simple">
+                        <strong>Saved cards</strong>
+                        <span>Tap to reuse</span>
+                      </div>
+                      <div className="saved-card-list">
+                        {customerProfile.cards.map((card) => (
+                          <button
+                            key={card.id}
+                            type="button"
+                            className="saved-card-chip polished-saved-card-chip"
+                            onClick={() => setPaymentCard({ name: card.name, last4: card.last4, brand: card.brand })}
+                          >
+                            {card.brand} •••• {card.last4}
+                          </button>
+                        ))}
+                      </div>
                     </div>
                   )}
-                </div>
 
-                <div className="checkout-summary-card compact-payment-summary">
-                  <div className="checkout-price-row"><span>Subtotal</span><strong>{formatMoney(cartSubtotal)}</strong></div>
-                  <div className="checkout-price-row"><span>Delivery fee</span><strong>{formatMoney(deliveryFee)}</strong></div>
-                  <div className="checkout-price-row"><span>Service fee</span><strong>{formatMoney(serviceFee)}</strong></div>
-                  <div className="checkout-price-row"><span>GST / HST</span><strong>${gstHst.toFixed(2)}</strong></div>
-                  <div className="checkout-price-row total"><span>Charge today</span><strong>${checkoutTotal.toFixed(2)}</strong></div>
+                  <div className="checkout-summary-card compact-payment-summary">
+                    <div className="section-head-simple">
+                      <strong>Charge summary</strong>
+                      <span>{formatMoney(checkoutTotal)}</span>
+                    </div>
+                    <div className="checkout-price-row"><span>Subtotal</span><strong>{formatMoney(cartSubtotal)}</strong></div>
+                    <div className="checkout-price-row"><span>Fees and tax</span><strong>{formatMoney(deliveryFee + serviceFee + gstHst)}</strong></div>
+                    <div className="checkout-price-row total"><span>Total</span><strong>{formatMoney(checkoutTotal)}</strong></div>
+                  </div>
                 </div>
 
                 <div className="uber-cart-footer dual-action-footer">
                   <button type="button" className="cta secondary" onClick={() => setCheckoutStage('summary')}>Back</button>
-                  <button type="button" className="uber-checkout-btn" onClick={submitCartOrder} disabled={!checkoutReady || uiState.submitting || !paymentCard.name.trim() || paymentCard.last4.length !== 4}>{uiState.submitting ? 'Submitting...' : `Pay $${checkoutTotal.toFixed(2)}`}</button>
+                  <button
+                    type="button"
+                    className="uber-checkout-btn polished-primary-cta"
+                    onClick={submitCartOrder}
+                    disabled={!checkoutReady || uiState.submitting || !paymentCard.name.trim() || paymentCard.last4.length !== 4}
+                  >
+                    {uiState.submitting ? 'Submitting...' : `Pay ${formatMoney(checkoutTotal)}`}
+                  </button>
                 </div>
               </>
             )}
 
             {checkoutStage === 'placed' && (
               <>
-                <div className="uber-cart-title-block placed-order-head">
-                  <h2>Order confirmed</h2>
-                  <p>Your order is in. Here is the full confirmation.</p>
+                <div className="confirmation-hero-card">
+                  <div className="confirmation-badge">✓</div>
+                  <div className="confirmation-copy">
+                    <span className="label">Order confirmed</span>
+                    <h2>You’re all set</h2>
+                    <p>Your order is placed and the bakery can take it from here.</p>
+                  </div>
                 </div>
 
                 <div className="live-map-card">
@@ -2810,7 +2974,7 @@ function App() {
                   </div>
                 </div>
 
-                <div className="checkout-summary-card">
+                <div className="checkout-summary-card confirmation-summary-card">
                   <div className="section-head-simple">
                     <strong>Final order</strong>
                     <span>{latestPlacedOrder?.shopLabel || checkoutShopLabel}</span>
@@ -2822,13 +2986,31 @@ function App() {
                   <div className="checkout-price-row"><span>Card used</span><strong>{latestPlacedOrder?.card?.brand || paymentCard.brand} •••• {latestPlacedOrder?.card?.last4 || paymentCard.last4 || 'Pending'}</strong></div>
                 </div>
 
+                <div className="confirmation-next-steps">
+                  <div className="section-head-simple">
+                    <strong>What happens next</strong>
+                    <span>Live order flow</span>
+                  </div>
+                  <div className="confirmation-step-list">
+                    <div className="confirmation-step"><strong>1</strong><span>Bakery confirms the order</span></div>
+                    <div className="confirmation-step"><strong>2</strong><span>Production starts and status updates show up in Orders</span></div>
+                    <div className="confirmation-step"><strong>3</strong><span>You get a pickup or delivery completion update</span></div>
+                  </div>
+                </div>
+
                 <div className="uber-cart-footer dual-action-footer">
                   <button type="button" className="cta secondary" onClick={() => setView('saved')}>View orders</button>
-                  <button type="button" className="uber-checkout-btn" onClick={() => {
-                    setCheckoutStage('summary')
-                    setView('builder')
-                    setBuilderScreen('store-menu')
-                  }}>Back to store</button>
+                  <button
+                    type="button"
+                    className="uber-checkout-btn polished-primary-cta"
+                    onClick={() => {
+                      setCheckoutStage('summary')
+                      setView('builder')
+                      setBuilderScreen('store-menu')
+                    }}
+                  >
+                    Back to store
+                  </button>
                 </div>
               </>
             )}
