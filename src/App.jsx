@@ -490,8 +490,8 @@ function App() {
   const [layers, setLayers] = useState(makeLayers(3, 'Birthday'))
   const [activeLayer, setActiveLayer] = useState(0)
   const [cart, setCart] = useState([])
-  const [view, setView] = useState('home')
-  const [guestMode, setGuestMode] = useState(false)
+  const [view, setView] = useState('auth')
+  const [, setGuestMode] = useState(false)
   const [profileSection, setProfileSection] = useState('profile')
   const [profileDrawerOpen, setProfileDrawerOpen] = useState(false)
   const [profileHelpOpen, setProfileHelpOpen] = useState(false)
@@ -1263,8 +1263,7 @@ function App() {
   async function addProfileAddress() {
     if (!addressDraft.label.trim() || !addressDraft.line1.trim()) return
     if (!authTokens.customer) {
-      setGuestMode(false)
-      setUiState((current) => ({ ...current, error: 'Sign in to save an address to your profile.', message: '' }))
+      openCustomerSignIn()
       return
     }
 
@@ -1291,8 +1290,7 @@ function App() {
   async function addProfileCard() {
     if (!cardDraft.name.trim() || cardDraft.last4.length !== 4) return
     if (!authTokens.customer) {
-      setGuestMode(false)
-      setUiState((current) => ({ ...current, error: 'Sign in to save a payment method to your profile.', message: '' }))
+      openCustomerSignIn()
       return
     }
 
@@ -1605,13 +1603,23 @@ function App() {
       }
 
       await signInDemoRole(role, { message: `${role} demo session reconnected.` })
+      if (role === 'customer') {
+        setGuestMode(false)
+        setView('accounts')
+      }
       setUiState((current) => ({ ...current, authUpdating: false }))
     } catch (error) {
       setUiState((current) => ({ ...current, authUpdating: false, error: getFriendlyError(error, 'Failed to update demo session.', `${role} demo session`) }))
     }
   }
 
-  if (!guestMode && !authTokens.customer) {
+  function openCustomerSignIn() {
+    setGuestMode(false)
+    setView('auth')
+    setUiState((current) => ({ ...current, error: '', message: '' }))
+  }
+
+  if (view === 'auth') {
     return (
       <div className="page auth-gate-page">
         <div className="phone-frame auth-gate-frame">
@@ -1626,6 +1634,7 @@ function App() {
               <button type="button" className="auth-guest-link" onClick={() => {
                 setDesiredDemoRoles({ customer: false, owner: false, staff: false, admin: false })
                 setGuestMode(true)
+                setView('home')
               }}>Continue without signing in</button>
             </div>
           </section>
@@ -1797,7 +1806,7 @@ function App() {
                         {authTokens.customer ? (
                           <button type="button" className="account-logout-button" onClick={handleCustomerLogout} disabled={uiState.authUpdating}>{uiState.authUpdating ? 'Logging out...' : 'Logout'}</button>
                         ) : (
-                          <button type="button" className="account-logout-button" onClick={() => { setGuestMode(false); toggleDemoSession('customer') }} disabled={uiState.authUpdating}>{uiState.authUpdating ? 'Reconnecting...' : 'Reconnect customer session'}</button>
+                          <button type="button" className="account-logout-button" onClick={openCustomerSignIn} disabled={uiState.authUpdating}>{uiState.authUpdating ? 'Reconnecting...' : 'Reconnect customer session'}</button>
                         )}
                       </div>
                     </div>
@@ -2337,7 +2346,7 @@ function App() {
 
                 <div className="uber-cart-footer">
                   {!authTokens.customer ? (
-                    <button type="button" className="uber-checkout-btn" onClick={() => { setGuestMode(false); toggleDemoSession('customer') }} disabled={uiState.authUpdating}>{uiState.authUpdating ? 'Logging in...' : 'Login to continue'}</button>
+                    <button type="button" className="uber-checkout-btn" onClick={openCustomerSignIn} disabled={uiState.authUpdating}>{uiState.authUpdating ? 'Logging in...' : 'Login to continue'}</button>
                   ) : fulfillmentType === 'pickup' && !selectedPickupSlot ? (
                     <button type="button" className="uber-checkout-btn" disabled>Choose pickup time</button>
                   ) : fulfillmentType === 'delivery' && !selectedAddress ? (
@@ -2634,7 +2643,7 @@ function App() {
                   <strong>Sign in required</strong>
                   <p>Save addresses to your profile after signing in.</p>
                   <div className="pill-row">
-                    <button type="button" className="pill active" onClick={() => { setGuestMode(false); toggleDemoSession('customer') }} disabled={uiState.authUpdating}>
+                    <button type="button" className="pill active" onClick={openCustomerSignIn} disabled={uiState.authUpdating}>
                       {uiState.authUpdating ? 'Signing in...' : 'Sign in to continue'}
                     </button>
                   </div>
@@ -2667,7 +2676,7 @@ function App() {
                 </div>
               ) : (
                 <div className="profile-form-grid blocked-auth-panel">
-                  <button type="button" className="cta polished-primary-cta" onClick={() => { setGuestMode(false); toggleDemoSession('customer') }} disabled={uiState.authUpdating}>
+                  <button type="button" className="cta polished-primary-cta" onClick={openCustomerSignIn} disabled={uiState.authUpdating}>
                     {uiState.authUpdating ? 'Signing in...' : 'Sign in to save address'}
                   </button>
                 </div>
@@ -2684,7 +2693,7 @@ function App() {
                   <strong>Sign in required</strong>
                   <p>Save cards and use faster checkout after signing in.</p>
                   <div className="pill-row">
-                    <button type="button" className="pill active" onClick={() => { setGuestMode(false); toggleDemoSession('customer') }} disabled={uiState.authUpdating}>
+                    <button type="button" className="pill active" onClick={openCustomerSignIn} disabled={uiState.authUpdating}>
                       {uiState.authUpdating ? 'Signing in...' : 'Sign in to continue'}
                     </button>
                   </div>
@@ -2721,7 +2730,7 @@ function App() {
                 </div>
               ) : (
                 <div className="profile-form-grid blocked-auth-panel">
-                  <button type="button" className="cta polished-primary-cta" onClick={() => { setGuestMode(false); toggleDemoSession('customer') }} disabled={uiState.authUpdating}>
+                  <button type="button" className="cta polished-primary-cta" onClick={openCustomerSignIn} disabled={uiState.authUpdating}>
                     {uiState.authUpdating ? 'Signing in...' : 'Sign in to save card'}
                   </button>
                 </div>
@@ -2821,7 +2830,7 @@ function App() {
                 {authTokens.customer ? (
                   <button type="button" className="pill active" onClick={handleCustomerLogout} disabled={uiState.authUpdating}>{uiState.authUpdating ? 'Logging out...' : 'Logout'}</button>
                 ) : (
-                  <button type="button" className="pill active" onClick={() => { setGuestMode(false); toggleDemoSession('customer') }} disabled={uiState.authUpdating}>{uiState.authUpdating ? 'Reconnecting...' : 'Reconnect'}</button>
+                  <button type="button" className="pill active" onClick={openCustomerSignIn} disabled={uiState.authUpdating}>{uiState.authUpdating ? 'Reconnecting...' : 'Reconnect'}</button>
                 )}
               </div>
             </div>}
