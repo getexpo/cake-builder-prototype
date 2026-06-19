@@ -1261,7 +1261,11 @@ function App() {
   }
 
   async function addProfileAddress() {
-    if (!authTokens.customer || !addressDraft.label.trim() || !addressDraft.line1.trim()) return
+    if (!addressDraft.label.trim() || !addressDraft.line1.trim()) return
+    if (!authTokens.customer) {
+      setUiState((current) => ({ ...current, error: 'Sign in to save an address to your profile.', message: '' }))
+      return
+    }
 
     setUiState((current) => ({ ...current, updating: true, error: '', message: '' }))
     try {
@@ -1284,7 +1288,11 @@ function App() {
   }
 
   async function addProfileCard() {
-    if (!authTokens.customer || !cardDraft.name.trim() || cardDraft.last4.length !== 4) return
+    if (!cardDraft.name.trim() || cardDraft.last4.length !== 4) return
+    if (!authTokens.customer) {
+      setUiState((current) => ({ ...current, error: 'Sign in to save a payment method to your profile.', message: '' }))
+      return
+    }
 
     setUiState((current) => ({ ...current, updating: true, error: '', message: '' }))
     try {
@@ -2619,6 +2627,17 @@ function App() {
                 <button type="button" className="pill" onClick={() => setProfileSection('profile')}>Back</button>
                 <strong>Addresses</strong>
               </div>
+              {!authTokens.customer ? (
+                <div className="checkout-inline-status-card">
+                  <strong>Sign in required</strong>
+                  <p>Save addresses to your profile after signing in.</p>
+                  <div className="pill-row">
+                    <button type="button" className="pill active" onClick={() => toggleDemoSession('customer')} disabled={uiState.authUpdating}>
+                      {uiState.authUpdating ? 'Signing in...' : 'Sign in to continue'}
+                    </button>
+                  </div>
+                </div>
+              ) : null}
               {customerProfile.addresses.map((address) => (
                 <button key={address.id} type="button" className={selectedAddressId === address.id ? 'profile-saved-row active' : 'profile-saved-row'} onClick={() => setSelectedAddressId(address.id)}>
                   <div>
@@ -2650,6 +2669,17 @@ function App() {
                 <button type="button" className="pill" onClick={() => setProfileSection('profile')}>Back</button>
                 <strong>Payment methods</strong>
               </div>
+              {!authTokens.customer ? (
+                <div className="checkout-inline-status-card">
+                  <strong>Sign in required</strong>
+                  <p>Save cards and use faster checkout after signing in.</p>
+                  <div className="pill-row">
+                    <button type="button" className="pill active" onClick={() => toggleDemoSession('customer')} disabled={uiState.authUpdating}>
+                      {uiState.authUpdating ? 'Signing in...' : 'Sign in to continue'}
+                    </button>
+                  </div>
+                </div>
+              ) : null}
               {customerProfile.cards.map((card) => (
                 <button key={card.id} type="button" className="profile-saved-row" onClick={() => setPaymentCard({ brand: card.brand, last4: card.last4, name: card.name })}>
                   <div>
