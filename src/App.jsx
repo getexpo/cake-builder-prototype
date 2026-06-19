@@ -729,8 +729,8 @@ function App() {
     shopName: location.name,
     items: cart.filter((item) => item.shopId === location.id),
   })).filter((group) => group.items.length)
-  const otherCartGroups = cartGroups.filter((group) => group.shopId !== activeCartGroup?.shopId)
   const activeCartGroup = cartGroups.find((group) => group.shopId === selectedCartShopId) || cartGroups[0] || null
+  const otherCartGroups = cartGroups.filter((group) => group.shopId !== activeCartGroup?.shopId)
   const activeCheckoutItem = activeCartGroup?.items?.[activeCartGroup.items.length - 1] || cart[cart.length - 1] || null
   const activeCheckoutSavedDesign = activeCheckoutItem?.savedDesignId
     ? savedDesigns.find((design) => design.id === activeCheckoutItem.savedDesignId) || null
