@@ -6,4 +6,3 @@ await page.goto('http://127.0.0.1:5173/', { waitUntil: 'networkidle', timeout: 6
 await page.click('.menu-dot-button')
 await page.screenshot({ path: '../temp/cake-app-all-collapsed-v1.png', fullPage: true })
 await browser.close()
-console.log('captured')

@@ -140,56 +140,6 @@ const notificationMoments = [
   'Ready for pickup alert',
 ]
 
-const accountCards = [
-  {
-    title: 'Customer account',
-    items: ['Email / Google / phone login', 'Saved designs and favorites', 'Order history and reorders'],
-  },
-  {
-    title: 'Owner account',
-    items: ['Shop workspace access', 'Team invites', 'Template and pricing permissions'],
-  },
-  {
-    title: 'Staff roles',
-    items: ['Baking queue access', 'Order status updates', 'Permission-based views'],
-  },
-  {
-    title: 'Platform admin',
-    items: ['All shops visibility', 'Billing/support access', 'Disputes and analytics controls'],
-  },
-]
-
-const profileSections = [
-  { id: 'profile', label: 'Profile' },
-  { id: 'settings', label: 'Settings' },
-  { id: 'notifications', label: 'Notifications' },
-  { id: 'locations', label: 'Locations' },
-  { id: 'security', label: 'Security' },
-]
-
-const settingsArchitecture = [
-  {
-    title: 'General',
-    items: ['Profile details', 'Business identity', 'Timezone and locale', 'Default fulfillment preferences'],
-  },
-  {
-    title: 'Notifications',
-    items: ['Order updates', 'Pickup reminders', 'Staff alerts', 'Admin incident escalation'],
-  },
-  {
-    title: 'Personalization',
-    items: ['Saved designs and favorites', 'Repeat-order shortcuts', 'Theme and accessibility choices', 'Preferred cake presets'],
-  },
-  {
-    title: 'Billing and storage',
-    items: ['Plan and invoices', 'Per-location billing', 'Media/storage usage', 'Payout and tax settings'],
-  },
-  {
-    title: 'Security and access',
-    items: ['Passwordless and social login', 'Device/session management', 'Team roles', 'Audit trail'],
-  },
-]
-
 const defaultOwnerLocations = [
   {
     id: 'shop-1',
@@ -255,12 +205,6 @@ const customerShopOptions = defaultOwnerLocations.map((location) => ({
   name: location.name,
 }))
 
-const bulkApplyTemplates = [
-  { id: 'holiday-menu', label: 'Holiday menu', detail: 'Push seasonal cakes and pricing' },
-  { id: 'pickup-hours', label: 'Pickup hours', detail: 'Align slot timing and reminders' },
-  { id: 'staff-playbook', label: 'Staff playbook', detail: 'Sync queue notes and handoff rules' },
-]
-
 const helpActions = [
   'Track a live order',
   'Reconnect your session',
@@ -269,13 +213,6 @@ const helpActions = [
 ]
 
 const DEMO_AUTH_STORAGE_KEY = 'cake-demo-auth-state'
-
-const roleSessionDescriptions = {
-  customer: 'Personal orders, saved cakes, and checkout recovery',
-  owner: 'Shop workspace, team coordination, and fulfillment controls',
-  staff: 'Production queue access with narrower permissions',
-  admin: 'Cross-shop analytics, disputes, and platform oversight',
-}
 
 function getDeviceLabel() {
   if (typeof navigator === 'undefined') return 'This browser'
@@ -448,11 +385,6 @@ function formatStatus(value) {
   return value ? value.replaceAll('_', ' ') : 'unknown'
 }
 
-function formatRoleLabel(role) {
-  if (!role) return 'Account'
-  return `${role.charAt(0).toUpperCase()}${role.slice(1)} account`
-}
-
 function formatTemplateLabel(value) {
   return value ? value.split('-').map((part) => `${part.charAt(0).toUpperCase()}${part.slice(1)}`).join(' ') : 'Template'
 }
@@ -533,15 +465,6 @@ function getPickupSlotState(slot = {}) {
   return { label: 'Available', detail: `${remaining} pickup spot${remaining === 1 ? '' : 's'} left.`, selectable: true }
 }
 
-function getDesignActivity(order) {
-  if (!order) return 'No order yet'
-  return `${formatStatus(order.status)}${order.pickupSlot?.label ? ` · ${order.pickupSlot.label}` : ''}`
-}
-
-function canCustomerCancelOrder(order = {}) {
-  return ['new', 'confirmed'].includes(order.status)
-}
-
 function getExceptionLabel(order = {}) {
   if (order.attentionFlags?.length) return order.attentionFlags[0].replaceAll('_', ' ')
   const slot = order.pickupSlot || {}
@@ -593,7 +516,6 @@ function App() {
   const [selectedAddressId, setSelectedAddressId] = useState('')
   const [latestPlacedOrder, setLatestPlacedOrder] = useState(null)
   const [customerShopId, setCustomerShopId] = useState(DEFAULT_SHOP_ID)
-  const [accountType, setAccountType] = useState('customer')
   const [savedDesigns, setSavedDesigns] = useState([])
   const [customerOrders, setCustomerOrders] = useState([])
   const [customerNotifications, setCustomerNotifications] = useState([])
@@ -610,11 +532,10 @@ function App() {
   const [adminDisputes, setAdminDisputes] = useState([])
   const [adminDisputeDrafts, setAdminDisputeDrafts] = useState({})
   const [adminAssignmentDrafts, setAdminAssignmentDrafts] = useState({})
-  const [customerSupportDrafts, setCustomerSupportDrafts] = useState({})
   const [authTokens, setAuthTokens] = useState({ customer: '', owner: '', staff: '', admin: '' })
   const [desiredDemoRoles, setDesiredDemoRoles] = useState(storedDemoAuthState.desiredRoles)
   const [accountSessions, setAccountSessions] = useState({})
-  const [backendSessionsByRole, setBackendSessionsByRole] = useState({ customer: [], owner: [], staff: [], admin: [] })
+  const [, setBackendSessionsByRole] = useState({ customer: [], owner: [], staff: [], admin: [] })
   const [sessionMeta, setSessionMeta] = useState(storedDemoAuthState.sessionMeta)
   const [accountAccess, setAccountAccess] = useState({
     staffQueue: { total: 0, byStatus: {} },
@@ -622,16 +543,12 @@ function App() {
     adminShops: [],
     adminTeam: [],
   })
-  const [authCheck, setAuthCheck] = useState({ status: 'idle', detail: '', denied: '' })
   const [favoriteDesignIds, setFavoriteDesignIds] = useState([])
   const [lastSavedDesignId, setLastSavedDesignId] = useState('')
   const [builderSourceDesignId, setBuilderSourceDesignId] = useState('')
   const [ownerLocations, setOwnerLocations] = useState(defaultOwnerLocations)
   const [activeOwnerLocationId, setActiveOwnerLocationId] = useState(defaultOwnerLocations[0].id)
-  const [selectedLocationIds, setSelectedLocationIds] = useState([defaultOwnerLocations[0].id])
-  const [bulkApplyTemplateId, setBulkApplyTemplateId] = useState(bulkApplyTemplates[0].id)
-  const [ownerTemplates, setOwnerTemplates] = useState([])
-  const [ownerTemplateDraft, setOwnerTemplateDraft] = useState({ id: '', name: '', occasion: '', defaultMode: 'simple', maxLayers: 1, allowedCakeTypes: [] })
+  const [, setOwnerTemplates] = useState([])
   const [uiState, setUiState] = useState({ loading: true, error: '', message: '', saving: false, submitting: false, updating: false, reorderingId: '', authUpdating: false, apiBaseUrl: '' })
   const googleAuthEnabled = true
   const backendRequiredForActions = HAS_REMOTE_API || typeof window === 'undefined' || window.location.hostname === 'localhost'
@@ -712,60 +629,8 @@ function App() {
     }] : []),
   ]
 
-  const activeAccountSession = accountSessions[accountType]
-  const sessionEntries = useMemo(() => ([
-    {
-      role: 'customer',
-      label: 'Customer session',
-      state: authTokens.customer ? 'Connected' : 'Signed out',
-      identity: accountSessions.customer?.name || DEFAULT_CUSTOMER_NAME,
-      detail: roleSessionDescriptions.customer,
-      email: accountSessions.customer?.email || DEMO_USERS.customer.email,
-      actionLabel: authTokens.customer ? 'Sign out' : 'Reconnect',
-      meta: sessionMeta.customer,
-      backendSessions: backendSessionsByRole.customer,
-    },
-    {
-      role: 'owner',
-      label: 'Owner workspace',
-      state: authTokens.owner ? 'Connected' : 'Signed out',
-      identity: accountSessions.owner?.name || DEMO_USERS.owner.name,
-      detail: roleSessionDescriptions.owner,
-      email: accountSessions.owner?.email || DEMO_USERS.owner.email,
-      actionLabel: authTokens.owner ? 'Sign out' : 'Reconnect',
-      meta: sessionMeta.owner,
-      backendSessions: backendSessionsByRole.owner,
-    },
-    {
-      role: 'staff',
-      label: 'Staff queue',
-      state: authTokens.staff ? 'Connected' : 'Signed out',
-      identity: accountSessions.staff?.name || DEMO_USERS.staff.name,
-      detail: roleSessionDescriptions.staff,
-      email: accountSessions.staff?.email || DEMO_USERS.staff.email,
-      actionLabel: authTokens.staff ? 'Sign out' : 'Reconnect',
-      meta: sessionMeta.staff,
-      backendSessions: backendSessionsByRole.staff,
-    },
-    {
-      role: 'admin',
-      label: 'Platform admin',
-      state: authTokens.admin ? 'Connected' : 'Signed out',
-      identity: accountSessions.admin?.name || DEMO_USERS.admin.name,
-      detail: roleSessionDescriptions.admin,
-      email: accountSessions.admin?.email || DEMO_USERS.admin.email,
-      actionLabel: authTokens.admin ? 'Sign out' : 'Reconnect',
-      meta: sessionMeta.admin,
-      backendSessions: backendSessionsByRole.admin,
-    },
-  ]), [accountSessions.admin, accountSessions.customer, accountSessions.owner, accountSessions.staff, authTokens.admin, authTokens.customer, authTokens.owner, authTokens.staff, backendSessionsByRole.admin, backendSessionsByRole.customer, backendSessionsByRole.owner, backendSessionsByRole.staff, sessionMeta.admin, sessionMeta.customer, sessionMeta.owner, sessionMeta.staff])
-  const connectedSessionCount = sessionEntries.filter((entry) => entry.state === 'Connected').length
-  const selectedLocationNames = ownerLocations.filter((location) => selectedLocationIds.includes(location.id)).map((location) => location.name)
   const activeOwnerLocation = ownerLocations.find((location) => location.id === activeOwnerLocationId) || ownerLocations[0] || null
   const ownerScopeQuery = activeOwnerLocationId ? `?shopId=${activeOwnerLocationId}` : ''
-  const activeOwnerTemplate = useMemo(() => (
-    ownerTemplates.find((template) => template.shopId === activeOwnerLocationId) || ownerTemplates[0] || null
-  ), [activeOwnerLocationId, ownerTemplates])
   const ownerStaffOptions = useMemo(() => {
     const scopedShopId = ownerOrder?.shopId || activeOwnerLocationId
     return ownerStaffByShop[scopedShopId] || ownerStaffByShop[DEFAULT_SHOP_ID] || []
@@ -902,7 +767,6 @@ function App() {
         { id: 'pickup', label: selectedPickupSlot?.label ? formatPickupWindow(selectedPickupSlot) : 'Pickup point', detail: 'Order handoff', side: 'center' },
         { id: 'customer', label: customerProfile.fullName || 'Customer', detail: 'Current customer location', side: 'right' },
       ]
-  const customerSessionLabel = authTokens.customer ? `${accountSessions.customer?.name || formatRoleLabel('customer')} connected` : 'Customer session required'
   const mainTabs = [
     { id: 'home', label: 'All Stores' },
     { id: 'builder', label: 'Build' },
@@ -924,7 +788,6 @@ function App() {
     flavor: editableFields.every((field) => Boolean(active?.[field])),
     review: Boolean(occasion && customerShopId && cakeType && layerCount && editableFields.every((field) => Boolean(active?.[field]))),
   }
-  const currentBuilderStepLabel = builderSteps[builderStepIndex]?.label || 'Build'
   const builderStepSummaries = {
     occasion: occasion,
     location: customerShopLabel,
@@ -941,15 +804,6 @@ function App() {
     fulfillmentType === 'delivery' && !selectedAddress?.line1 ? 'Choose a delivery address' : null,
   ].filter(Boolean)
   const checkoutReady = checkoutBlockers.length === 0
-  const checkoutNextStep = !authTokens.customer
-    ? 'Continue to enter your details.'
-    : !cart.length
-      ? 'Add a cake to the cart to continue.'
-      : !selectedPickupSlot
-        ? 'Choose a pickup time.'
-        : !checkoutReady
-          ? 'Finish the remaining checkout step.'
-          : 'Buy now.'
 
   const hydrateData = useCallback(async (tokens, { preserveMessage = true } = {}) => {
     setUiState((current) => ({ ...current, loading: true, error: preserveMessage ? current.error : '', message: preserveMessage ? current.message : '' }))
@@ -1012,11 +866,6 @@ function App() {
       setActiveOwnerLocationId((current) => {
         const availableIds = new Set((normalizedLocations.length ? normalizedLocations : defaultOwnerLocations).map((location) => location.id))
         return availableIds.has(current) ? current : Array.from(availableIds)[0]
-      })
-      setSelectedLocationIds((current) => {
-        const availableIds = new Set((normalizedLocations.length ? normalizedLocations : defaultOwnerLocations).map((location) => location.id))
-        const kept = current.filter((id) => availableIds.has(id))
-        return kept.length ? kept : [Array.from(availableIds)[0]]
       })
       setOwnerTemplates(ownerTemplateData)
       setSavedDesigns(designData)
@@ -1095,19 +944,6 @@ function App() {
   useEffect(() => {
     ownerOrderIdRef.current = ownerOrderId
   }, [ownerOrderId])
-
-  useEffect(() => {
-    if (activeOwnerTemplate) {
-      setOwnerTemplateDraft({
-        id: activeOwnerTemplate.id,
-        name: activeOwnerTemplate.name || '',
-        occasion: activeOwnerTemplate.occasion || '',
-        defaultMode: activeOwnerTemplate.defaultMode || 'simple',
-        maxLayers: activeOwnerTemplate.maxLayers || 1,
-        allowedCakeTypes: activeOwnerTemplate.allowedCakeTypes || [],
-      })
-    }
-  }, [activeOwnerTemplate])
 
   useEffect(() => {
     if (!ownerOrderId || !authTokens.owner) return
@@ -1273,22 +1109,6 @@ function App() {
     setActiveLayer((current) => Math.min(current, safeLayerCount - 1))
   }
 
-  const advanceBuilderStep = () => {
-    setBuilderStep((current) => {
-      const index = builderSteps.findIndex((step) => step.id === current)
-      if (index === -1 || index === builderSteps.length - 1) return current
-      return builderSteps[index + 1].id
-    })
-  }
-
-  const goToPreviousBuilderStep = () => {
-    setBuilderStep((current) => {
-      const index = builderSteps.findIndex((step) => step.id === current)
-      if (index <= 0) return current
-      return builderSteps[index - 1].id
-    })
-  }
-
   const updateLayerCount = (count) => {
     const rules = modeRules[mode]
     const safeCount = clampLayerCount(count, rules)
@@ -1299,33 +1119,6 @@ function App() {
 
   const updateLayerField = (field, value, layerIndex = activeLayer) => {
     setLayers((current) => current.map((layer, index) => (index === layerIndex ? { ...layer, [field]: value } : layer)))
-  }
-
-  const applyActiveLayerToAll = () => {
-    setLayers((current) => current.map((layer, index) => {
-      const nextLayer = { ...layer }
-      editableFields.forEach((field) => {
-        nextLayer[field] = current[activeLayer][field]
-      })
-      nextLayer.id = index
-      nextLayer.name = `Layer ${index + 1}`
-      return nextLayer
-    }))
-    setUiState((current) => ({ ...current, message: `${active.name} settings applied across all layers.`, error: '' }))
-  }
-
-  const resetActiveLayerToPreset = () => {
-    const presetLayer = makeLayers(layerCount, occasion)[activeLayer]
-    setLayers((current) => current.map((layer) => {
-      if (layer.id !== activeLayer) return layer
-
-      const nextLayer = { ...layer }
-      editableFields.forEach((field) => {
-        nextLayer[field] = presetLayer[field]
-      })
-      return nextLayer
-    }))
-    setUiState((current) => ({ ...current, message: `${active.name} reset to the ${occasion} preset.`, error: '' }))
   }
 
   const addToCart = () => {
@@ -1513,50 +1306,6 @@ function App() {
     }
   }
 
-  async function reorderDesign(designId, estimatedTotal) {
-    if (!pickupSlotId) return
-
-    setUiState((current) => ({ ...current, reorderingId: designId, error: '', message: '' }))
-    try {
-      await apiFetch(`/api/designs/${designId}/reorder`, {
-        method: 'POST',
-        headers: { Authorization: `Bearer ${authTokens.customer}` },
-        body: JSON.stringify({
-          pickupSlotId,
-          customer: DEFAULT_CUSTOMER_NAME,
-          total: estimatedTotal || totalPrice,
-          notes: 'Reordered from saved designs screen',
-        }),
-      })
-      await hydrateData(authTokens, { preserveMessage: false })
-      setView('saved')
-      setUiState((current) => ({ ...current, reorderingId: '', message: `Reorder created for ${selectedPickupSlot?.label || 'pickup'} and pushed into the live queue.` }))
-    } catch (error) {
-      setUiState((current) => ({ ...current, reorderingId: '', error: getFriendlyError(error, 'Failed to reorder design.', 'Customer demo session') }))
-    }
-  }
-
-  async function toggleFavoriteDesign(designId) {
-    const isFavorite = !favoriteDesignIds.includes(designId)
-    setUiState((current) => ({ ...current, updating: true, error: '', message: '' }))
-    try {
-      await apiFetch(`/api/designs/${designId}`, {
-        method: 'PATCH',
-        headers: { Authorization: `Bearer ${authTokens.customer}` },
-        body: JSON.stringify({ isFavorite }),
-      })
-      await hydrateData(authTokens, { preserveMessage: false })
-      setUiState((current) => ({ ...current, updating: false, message: isFavorite ? 'Design favorited across sessions.' : 'Design removed from favorites.' }))
-    } catch (error) {
-      setUiState((current) => ({ ...current, updating: false, error: getFriendlyError(error, 'Failed to update favorite.', 'Customer demo session') }))
-    }
-  }
-
-  function removeCartItem(itemId) {
-    setCart((current) => current.filter((item) => item.id !== itemId))
-    setUiState((current) => ({ ...current, error: '', message: 'Item removed from cart.' }))
-  }
-
   function updateCartItemQuantity(itemId, delta) {
     setCart((current) => current.flatMap((item) => {
       if (item.id !== itemId) return [item]
@@ -1571,113 +1320,6 @@ function App() {
     setCheckoutStage('summary')
     setPickupSlotId('')
     setView('checkout')
-  }
-
-  function addSavedDesignToCart(design) {
-    const nextConfig = design.config || {}
-    const nextLayerCount = nextConfig.layerCount || 1
-    const item = {
-      id: Date.now(),
-      title: design.title,
-      layerCount: nextLayerCount,
-      unitPrice: design.estimatedTotal || totalPrice,
-      quantity: 1,
-      totalPrice: design.estimatedTotal || totalPrice,
-      shopId: design.shopId || DEFAULT_SHOP_ID,
-      savedDesignId: design.id,
-      config: {
-        occasion: nextConfig.occasion || occasion,
-        mode: nextConfig.mode || mode,
-        cakeType: nextConfig.cakeType || cakeType,
-        layerCount: nextLayerCount,
-        layers: nextConfig.layers || layers,
-      },
-    }
-    setCart((current) => [...current, item])
-    setView('checkout')
-    setUiState((current) => ({ ...current, error: '', message: `${design.title} added to cart from saved designs.` }))
-  }
-
-  function loadSavedDesign(design) {
-    setBuilderSourceDesignId(design.id)
-    setCustomerShopId(design.shopId || DEFAULT_SHOP_ID)
-    const nextConfig = design.config || {}
-    const nextMode = nextConfig.mode || mode
-    const rules = modeRules[nextMode]
-    const nextOccasion = nextConfig.occasion || occasion
-    const nextLayerCount = clampLayerCount(nextConfig.layerCount || 1, rules)
-    const nextCakeType = rules.cakeTypes.includes(nextConfig.cakeType) ? nextConfig.cakeType : rules.cakeTypes[0]
-    const nextLayers = buildLayerSet({ count: nextLayerCount, occasion: nextOccasion, mode: nextMode, existingLayers: nextConfig.layers || [] })
-
-    setOccasion(nextOccasion)
-    setMode(nextMode)
-    setCakeType(nextCakeType)
-    setLayerCount(nextLayerCount)
-    setLayers(nextLayers)
-    setActiveLayer(0)
-    setView('builder')
-    setUiState((current) => ({ ...current, message: `Loaded ${design.title} back into the builder.`, error: '' }))
-  }
-
-  function toggleLocationSelection(locationId) {
-    setSelectedLocationIds((current) => {
-      if (current.includes(locationId)) {
-        if (current.length === 1) return current
-        return current.filter((id) => id !== locationId)
-      }
-
-      return [...current, locationId]
-    })
-  }
-
-  async function applyBulkTemplate() {
-    const template = bulkApplyTemplates.find((item) => item.id === bulkApplyTemplateId)
-    if (!selectedLocationIds.length) {
-      setUiState((current) => ({ ...current, error: 'Select at least one location before applying changes.' }))
-      return
-    }
-
-    setUiState((current) => ({ ...current, updating: true, error: '', message: '' }))
-    try {
-      const result = await apiFetch('/api/owner/location-bulk-apply', {
-        method: 'POST',
-        headers: { Authorization: `Bearer ${authTokens.owner}` },
-        body: JSON.stringify({ templateKey: bulkApplyTemplateId, shopIds: selectedLocationIds }),
-      })
-      await hydrateData(authTokens, { preserveMessage: false })
-      const scope = result.updatedShops.length === ownerLocations.length ? 'all locations' : selectedLocationNames.join(', ')
-      setUiState((current) => ({
-        ...current,
-        updating: false,
-        error: '',
-        message: `${template?.label || 'Template'} applied to ${scope}. ${result.updatedShops.length} location${result.updatedShops.length === 1 ? '' : 's'} updated.`,
-      }))
-    } catch (error) {
-      setUiState((current) => ({ ...current, updating: false, error: getFriendlyError(error, 'Failed to apply location updates.', 'Owner demo session') }))
-    }
-  }
-
-  async function saveOwnerTemplate() {
-    if (!ownerTemplateDraft.id || !authTokens.owner) return
-
-    setUiState((current) => ({ ...current, updating: true, error: '', message: '' }))
-    try {
-      await apiFetch(`/api/owner/templates/${ownerTemplateDraft.id}`, {
-        method: 'PATCH',
-        headers: { Authorization: `Bearer ${authTokens.owner}` },
-        body: JSON.stringify({
-          name: ownerTemplateDraft.name.trim(),
-          occasion: ownerTemplateDraft.occasion.trim(),
-          defaultMode: ownerTemplateDraft.defaultMode,
-          maxLayers: Number(ownerTemplateDraft.maxLayers),
-          allowedCakeTypes: ownerTemplateDraft.allowedCakeTypes,
-        }),
-      })
-      await hydrateData(authTokens, { preserveMessage: false })
-      setUiState((current) => ({ ...current, updating: false, error: '', message: `Template updated for ${activeOwnerLocation?.name || 'the active location'}.` }))
-    } catch (error) {
-      setUiState((current) => ({ ...current, updating: false, error: getFriendlyError(error, 'Failed to save location template.', 'Owner demo session') }))
-    }
   }
 
   async function handleCustomerLogout() {
@@ -1892,43 +1534,6 @@ function App() {
     }
   }
 
-  async function addCustomerSupportMessage(orderId) {
-    const body = customerSupportDrafts[orderId]?.trim()
-    if (!body) {
-      setUiState((current) => ({ ...current, error: 'Write your support message before sending it.' }))
-      return
-    }
-
-    setUiState((current) => ({ ...current, updating: true, error: '', message: '' }))
-    try {
-      await apiFetch(`/api/orders/${orderId}/support-messages`, {
-        method: 'POST',
-        headers: { Authorization: `Bearer ${authTokens.customer}` },
-        body: JSON.stringify({ body }),
-      })
-      setCustomerSupportDrafts((current) => ({ ...current, [orderId]: '' }))
-      await hydrateData(authTokens, { preserveMessage: false })
-      setUiState((current) => ({ ...current, updating: false, message: 'Support message sent and surfaced to admin.' }))
-    } catch (error) {
-      setUiState((current) => ({ ...current, updating: false, error: getFriendlyError(error, 'Failed to send support message.', 'Customer demo session') }))
-    }
-  }
-
-  async function cancelCustomerOrder(orderId) {
-    setUiState((current) => ({ ...current, updating: true, error: '', message: '' }))
-    try {
-      await apiFetch(`/api/orders/${orderId}/cancel`, {
-        method: 'POST',
-        headers: { Authorization: `Bearer ${authTokens.customer}` },
-        body: JSON.stringify({ reason: 'Customer changed plans before production started' }),
-      })
-      await hydrateData(authTokens, { preserveMessage: false })
-      setUiState((current) => ({ ...current, updating: false, message: 'Order cancelled before production and moved into refund follow-up.' }))
-    } catch (error) {
-      setUiState((current) => ({ ...current, updating: false, error: getFriendlyError(error, 'Failed to cancel order.', 'Customer demo session') }))
-    }
-  }
-
   async function toggleDemoSession(role) {
     setUiState((current) => ({ ...current, authUpdating: true, error: '', message: '' }))
     try {
@@ -1985,7 +1590,6 @@ function App() {
             ...createSessionMetaPatch({ state: 'signed_out' }),
           },
         }))
-        setAuthCheck((current) => current.status === role ? { status: 'idle', detail: '', denied: '' } : current)
         setUiState((current) => ({ ...current, authUpdating: false, message: `${role} demo session signed out.` }))
         return
       }
@@ -1996,104 +1600,6 @@ function App() {
       setUiState((current) => ({ ...current, authUpdating: false, error: getFriendlyError(error, 'Failed to update demo session.', `${role} demo session`) }))
     }
   }
-
-  async function signOutOtherSessions(role) {
-    const token = authTokens[role]
-    const currentSessionId = backendSessionsByRole[role]?.find((session) => session.isCurrent)?.id
-    if (!token || !currentSessionId) return
-
-    setUiState((current) => ({ ...current, authUpdating: true, error: '', message: '' }))
-    try {
-      const result = await apiFetch(`/api/auth/sessions/${currentSessionId}/revoke`, {
-        method: 'POST',
-        headers: { Authorization: `Bearer ${token}` },
-        body: JSON.stringify({ scope: 'others' }),
-      })
-      await hydrateData(authTokens, { preserveMessage: false })
-      setUiState((current) => ({ ...current, authUpdating: false, message: result.revokedCount ? `${role} signed out ${result.revokedCount} other session${result.revokedCount === 1 ? '' : 's'}.` : `No other ${role} sessions were active.` }))
-    } catch (error) {
-      setUiState((current) => ({ ...current, authUpdating: false, error: getFriendlyError(error, 'Failed to sign out other sessions.', `${role} demo session`) }))
-    }
-  }
-
-  async function revokeBackendSession(role, sessionId) {
-    const token = authTokens[role]
-    if (!token || !sessionId) return
-
-    setUiState((current) => ({ ...current, authUpdating: true, error: '', message: '' }))
-    try {
-      const result = await apiFetch(`/api/auth/sessions/${sessionId}/revoke`, {
-        method: 'POST',
-        headers: { Authorization: `Bearer ${token}` },
-      })
-      await hydrateData(authTokens, { preserveMessage: false })
-      setUiState((current) => ({
-        ...current,
-        authUpdating: false,
-        message: result.revokedCount ? `${role} session ${sessionId} revoked.` : `No ${role} session was revoked.`,
-      }))
-    } catch (error) {
-      setUiState((current) => ({ ...current, authUpdating: false, error: getFriendlyError(error, 'Failed to revoke that session.', `${role} demo session`) }))
-    }
-  }
-
-  async function restoreRecommendedSessions() {
-    setUiState((current) => ({ ...current, authUpdating: true, error: '', message: '' }))
-    try {
-      setDesiredDemoRoles({ customer: true, owner: true, staff: true, admin: true })
-      setUiState((current) => ({ ...current, authUpdating: false, message: 'Recommended demo sessions restored.' }))
-    } catch (error) {
-      setUiState((current) => ({ ...current, authUpdating: false, error: getFriendlyError(error, 'Failed to restore demo sessions.', 'Session center') }))
-    }
-  }
-
-  async function runPermissionCheck() {
-    setAuthCheck({ status: 'checking', detail: '', denied: '' })
-    const token = authTokens[accountType]
-
-    if (!token) {
-      setAuthCheck({ status: 'signed_out', detail: `${accountType} session is signed out.`, denied: '' })
-      return
-    }
-
-    const allowedPath = accountType === 'customer'
-      ? '/api/orders/me'
-      : accountType === 'admin'
-        ? '/api/admin/analytics'
-        : '/api/owner/orders/summary'
-
-    const deniedPath = accountType === 'customer' ? '/api/admin/analytics' : '/api/designs'
-
-    try {
-      await apiFetch(allowedPath, { headers: { Authorization: `Bearer ${token}` } })
-      let deniedMessage = 'No denial check run.'
-      try {
-        await apiFetch(deniedPath, { headers: { Authorization: `Bearer ${token}` } })
-        deniedMessage = 'Unexpectedly allowed, review backend guard.'
-      } catch (error) {
-        deniedMessage = getFriendlyError(error, 'Blocked as expected.', `${accountType} demo session`)
-      }
-
-      setAuthCheck({ status: 'ok', detail: `${accountType} can reach ${allowedPath}.`, denied: deniedMessage })
-    } catch (error) {
-      setAuthCheck({ status: 'error', detail: getFriendlyError(error, 'Permission check failed.', `${accountType} demo session`), denied: '' })
-    }
-  }
-
-  const favoriteDesigns = savedDesigns.filter((design) => favoriteDesignIds.includes(design.id) || design.isFavorite)
-  const savedDesignOrderMap = useMemo(() => {
-    return customerOrders.reduce((acc, order) => {
-      if (!order.savedDesignId) return acc
-      const existing = acc[order.savedDesignId]
-      if (!existing || new Date(order.createdAt || 0) > new Date(existing.createdAt || 0)) {
-        acc[order.savedDesignId] = order
-      }
-      return acc
-    }, {})
-  }, [customerOrders])
-  const favoriteOrders = favoriteDesigns.length
-    ? favoriteDesigns.map((design) => design.title)
-    : customerOrders.slice(0, 3).map((order) => order.savedDesign?.title || order.designSnapshot?.occasion || order.id)
 
   if (!guestMode && !authTokens.customer) {
     return (
