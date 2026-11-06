@@ -19,7 +19,6 @@ const API_ROUTE_PROBE = [
   { path: '/api/admin/team', allowedStatuses: [401, 403] },
 ]
 const DEFAULT_SHOP_ID = 'shop-1'
-const DEFAULT_CUSTOMER_NAME = 'Emma Johnson'
 const DEMO_USERS = {
   customer: { email: 'customer@demo.com', role: 'customer', name: 'Emma Johnson' },
   owner: { email: 'owner@demo.com', role: 'owner', name: 'Maya Chen' },
@@ -213,6 +212,47 @@ const helpActions = [
 ]
 
 const DEMO_AUTH_STORAGE_KEY = 'cake-demo-auth-state'
+const CART_STORAGE_KEY = 'cake-cart'
+const AUTH_RETURN_STORAGE_KEY = 'cake-auth-return'
+const AUTH_RETURN_MAX_AGE_MS = 30 * 60 * 1000
+
+function readStoredCart() {
+  if (typeof window === 'undefined') return []
+  try {
+    const parsed = JSON.parse(window.localStorage.getItem(CART_STORAGE_KEY) || '[]')
+    // Drop anything malformed so a bad stored cart can never crash checkout.
+    return Array.isArray(parsed) ? parsed.filter((item) => item && typeof item === 'object' && item.config && Array.isArray(item.config.layers)) : []
+  } catch {
+    return []
+  }
+}
+
+function saveAuthReturn(target) {
+  try {
+    window.localStorage.setItem(AUTH_RETURN_STORAGE_KEY, JSON.stringify({ ...target, savedAt: Date.now() }))
+  } catch {
+    // storage unavailable; user will land on home after sign-in
+  }
+}
+
+function peekAuthReturn() {
+  if (typeof window === 'undefined') return null
+  try {
+    const parsed = JSON.parse(window.localStorage.getItem(AUTH_RETURN_STORAGE_KEY) || 'null')
+    if (!parsed?.view || Date.now() - (parsed.savedAt || 0) > AUTH_RETURN_MAX_AGE_MS) return null
+    return parsed
+  } catch {
+    return null
+  }
+}
+
+function clearAuthReturn() {
+  try {
+    window.localStorage.removeItem(AUTH_RETURN_STORAGE_KEY)
+  } catch {
+    // ignore
+  }
+}
 
 function getDeviceLabel() {
   if (typeof navigator === 'undefined') return 'This browser'
@@ -489,8 +529,10 @@ function App() {
   const [layerCount, setLayerCount] = useState(3)
   const [layers, setLayers] = useState(makeLayers(3, 'Birthday'))
   const [activeLayer, setActiveLayer] = useState(0)
-  const [cart, setCart] = useState([])
-  const [view, setView] = useState('auth')
+  const [cart, setCart] = useState(readStoredCart)
+  const [view, setView] = useState(() => peekAuthReturn()?.view || 'home')
+  const [authReturnView, setAuthReturnView] = useState('home')
+  const [customerAuthStatus, setCustomerAuthStatus] = useState(supabase ? 'checking' : 'signed_out')
   const [, setGuestMode] = useState(false)
   const [profileSection, setProfileSection] = useState('profile')
   const [profileDrawerOpen, setProfileDrawerOpen] = useState(false)
@@ -533,7 +575,7 @@ function App() {
   const [adminDisputeDrafts, setAdminDisputeDrafts] = useState({})
   const [adminAssignmentDrafts, setAdminAssignmentDrafts] = useState({})
   const [authTokens, setAuthTokens] = useState({ customer: '', owner: '', staff: '', admin: '' })
-  const [desiredDemoRoles, setDesiredDemoRoles] = useState(storedDemoAuthState.desiredRoles)
+  const [desiredDemoRoles, setDesiredDemoRoles] = useState(() => (supabase ? { ...storedDemoAuthState.desiredRoles, customer: false } : storedDemoAuthState.desiredRoles))
   const [accountSessions, setAccountSessions] = useState({})
   const [, setBackendSessionsByRole] = useState({ customer: [], owner: [], staff: [], admin: [] })
   const [sessionMeta, setSessionMeta] = useState(storedDemoAuthState.sessionMeta)
@@ -550,58 +592,74 @@ function App() {
   const [activeOwnerLocationId, setActiveOwnerLocationId] = useState(defaultOwnerLocations[0].id)
   const [, setOwnerTemplates] = useState([])
   const [uiState, setUiState] = useState({ loading: true, error: '', message: '', saving: false, submitting: false, updating: false, reorderingId: '', authUpdating: false, apiBaseUrl: '' })
-  const googleAuthEnabled = true
   const backendRequiredForActions = HAS_REMOTE_API || typeof window === 'undefined' || window.location.hostname === 'localhost'
   const customerVisibleError = view === 'builder' || view === 'home' ? '' : uiState.error
   const ownerOrderIdRef = useRef('')
 
+  const hydrateSeqRef = useRef(0)
+
+  // Customer auth: Supabase (Google) is the single source of truth.
+  // On every real sign-in we exchange the Google access token for a backend customer session.
   useEffect(() => {
-    if (!supabase || !googleAuthEnabled) return
+    if (!supabase) return undefined
+    let cancelled = false
+    let connectedUserId = ''
 
-    supabase.auth.getSession().then(({ data }) => {
-      const session = data.session
-      if (!session?.user) return
-      setDesiredDemoRoles((current) => ({ ...current, customer: true }))
-      setAuthTokens((current) => ({ ...current, customer: `supabase:${session.access_token}` }))
-      setAccountSessions((current) => ({
-        ...current,
-        customer: {
-          name: session.user.user_metadata?.full_name || session.user.user_metadata?.name || DEFAULT_CUSTOMER_NAME,
-          email: session.user.email || DEMO_USERS.customer.email,
-          role: 'customer',
-        },
-      }))
-      setView('home')
-      setProfileSection('profile')
-      setUiState((current) => ({ ...current, error: '' }))
-    })
-
-    const { data: listener } = supabase.auth.onAuthStateChange((_event, session) => {
-      if (session?.user) {
-        setDesiredDemoRoles((current) => ({ ...current, customer: true }))
-        setAuthTokens((current) => ({ ...current, customer: `supabase:${session.access_token}` }))
-        setAccountSessions((current) => ({
-          ...current,
-          customer: {
-            name: session.user.user_metadata?.full_name || session.user.user_metadata?.name || DEFAULT_CUSTOMER_NAME,
-            email: session.user.email || DEMO_USERS.customer.email,
-            role: 'customer',
-          },
-        }))
-        setView('home')
-        setProfileSection('profile')
-        setUiState((current) => ({ ...current, error: '' }))
+    async function connectCustomer(session) {
+      if (cancelled) return
+      if (!session?.user) {
+        connectedUserId = ''
+        setAuthTokens((current) => (current.customer ? { ...current, customer: '' } : current))
+        setAccountSessions((current) => ({ ...current, customer: null }))
+        setCustomerAuthStatus('signed_out')
+        clearAuthReturn()
         return
       }
+      if (connectedUserId === session.user.id) return
+      connectedUserId = session.user.id
+      setCustomerAuthStatus('checking')
+      try {
+        const response = await apiFetch('/api/auth/google', {
+          method: 'POST',
+          body: JSON.stringify({ accessToken: session.access_token }),
+        })
+        if (cancelled) return
+        setAuthTokens((current) => ({ ...current, customer: response.token }))
+        setAccountSessions((current) => ({ ...current, customer: response.user }))
+        setCustomerAuthStatus('signed_in')
+        const returnTarget = peekAuthReturn()
+        clearAuthReturn()
+        if (returnTarget?.view) setView(returnTarget.view)
+      } catch (error) {
+        if (cancelled) return
+        connectedUserId = ''
+        clearAuthReturn()
+        setCustomerAuthStatus('signed_out')
+        setUiState((current) => ({ ...current, authUpdating: false, error: `Signed in with Google, but your account could not be opened. ${error.message || ''}`.trim() }))
+        await supabase.auth.signOut()
+      }
+    }
 
-      setDesiredDemoRoles((current) => ({ ...current, customer: false }))
-      setAuthTokens((current) => ({ ...current, customer: '' }))
-      setAccountSessions((current) => ({ ...current, customer: null }))
-      setView('auth')
+    const { data: listener } = supabase.auth.onAuthStateChange((event, session) => {
+      // Token refreshes do not change who is signed in, so they must never move the user.
+      if (event === 'TOKEN_REFRESHED' || event === 'USER_UPDATED') return
+      // Defer: Supabase recommends not awaiting other calls inside this callback.
+      setTimeout(() => { connectCustomer(session) }, 0)
     })
 
-    return () => listener.subscription.unsubscribe()
+    return () => {
+      cancelled = true
+      listener.subscription.unsubscribe()
+    }
   }, [])
+
+  useEffect(() => {
+    try {
+      window.localStorage.setItem(CART_STORAGE_KEY, JSON.stringify(cart))
+    } catch {
+      // storage unavailable
+    }
+  }, [cart])
 
   const active = layers[activeLayer]
   const visibleLayers = useMemo(() => layers.slice().reverse(), [layers])
@@ -806,7 +864,7 @@ function App() {
     review: stepCompletion.review ? 'Ready' : 'Incomplete',
   }
   const checkoutBlockers = [
-    !authTokens.customer ? 'Reconnect the customer demo session' : null,
+    !authTokens.customer ? 'Sign in to place your order' : null,
     !cart.length ? 'Add a cake to the cart' : null,
     fulfillmentType === 'pickup' && !selectedPickupSlot ? 'Choose a pickup slot' : null,
     fulfillmentType === 'pickup' && selectedPickupSlot && !getPickupSlotState(selectedPickupSlot).selectable ? 'Choose an available pickup slot that is not full, paused, or expired' : null,
@@ -816,6 +874,7 @@ function App() {
   const checkoutReady = checkoutBlockers.length === 0
 
   const hydrateData = useCallback(async (tokens, { preserveMessage = true } = {}) => {
+    const seq = ++hydrateSeqRef.current
     setUiState((current) => ({ ...current, loading: true, error: preserveMessage ? current.error : '', message: preserveMessage ? current.message : '' }))
     try {
       const ownerHeaders = tokens.owner ? { Authorization: `Bearer ${tokens.owner}` } : null
@@ -837,7 +896,6 @@ function App() {
         staffHeaders ? apiFetch('/api/auth/me', { headers: staffHeaders }) : Promise.resolve({ user: null }),
         adminHeaders ? apiFetch('/api/auth/me', { headers: adminHeaders }) : Promise.resolve({ user: null }),
         customerHeaders ? apiFetch('/api/auth/sessions', { headers: customerHeaders }) : Promise.resolve({ sessions: [] }),
-        customerHeaders ? apiFetch('/api/profile', { headers: customerHeaders }) : Promise.resolve(null),
         ownerHeaders ? apiFetch('/api/auth/sessions', { headers: ownerHeaders }) : Promise.resolve({ sessions: [] }),
         staffHeaders ? apiFetch('/api/auth/sessions', { headers: staffHeaders }) : Promise.resolve({ sessions: [] }),
         adminHeaders ? apiFetch('/api/auth/sessions', { headers: adminHeaders }) : Promise.resolve({ sessions: [] }),
@@ -856,6 +914,9 @@ function App() {
         preferredOrder ? apiFetch(`/api/notifications?orderId=${preferredOrder.id}`) : Promise.resolve([]),
         latestOrder ? apiFetch(`/api/notifications?orderId=${latestOrder.id}`) : Promise.resolve([]),
       ])
+      const customerProfileData = customerHeaders ? await apiFetch('/api/profile', { headers: customerHeaders }) : null
+      // A newer hydrate started (e.g. user signed in/out mid-request): drop these stale results.
+      if (seq !== hydrateSeqRef.current) return
 
       setPickupSlots(activeSlots)
       setPickupSlotId((current) => {
@@ -882,11 +943,10 @@ function App() {
       setFavoriteDesignIds(designData.filter((design) => design.isFavorite).map((design) => design.id))
       setCustomerOrders(orderData)
       setCustomerNotifications(customerNotificationData)
-      const customerProfileData = customerHeaders ? await apiFetch('/api/profile', { headers: customerHeaders }) : null
       if (customerProfileData) {
         setCustomerProfile({
-          fullName: customerProfileData.fullName || customerSession.user?.name || DEFAULT_CUSTOMER_NAME,
-          email: customerProfileData.email || customerSession.user?.email || DEMO_USERS.customer.email,
+          fullName: customerProfileData.fullName || customerSession.user?.name || '',
+          email: customerProfileData.email || customerSession.user?.email || '',
           addresses: customerProfileData.addresses || [],
           cards: customerProfileData.cards || [],
         })
@@ -897,6 +957,10 @@ function App() {
           fullName: customerSession.user.name || current.fullName,
           email: customerSession.user.email || current.email,
         }))
+      }
+      if (!customerHeaders) {
+        setCustomerProfile({ fullName: '', email: '', addresses: [], cards: [] })
+        setSelectedAddressId('')
       }
       setOwnerSummary(summaryData)
       setOwnerQueue(queueData)
@@ -947,7 +1011,8 @@ function App() {
       const baseUrl = await resolveApiBase()
       setUiState((current) => ({ ...current, loading: false, error: '', apiBaseUrl: baseUrl }))
     } catch (error) {
-      setUiState((current) => ({ ...current, loading: false, error: view === 'builder' ? '' : (error.message || 'Failed to load live backend data.') }))
+      if (seq !== hydrateSeqRef.current) return
+      setUiState((current) => ({ ...current, loading: false, error: error.message || 'Failed to load live backend data.' }))
     }
   }, [ownerScopeQuery])
 
@@ -977,7 +1042,6 @@ function App() {
   }, [authTokens.owner, ownerOrderId])
 
   useEffect(() => {
-    if (!authTokens.owner) return
     hydrateData(authTokens, { preserveMessage: true })
   }, [activeOwnerLocationId, authTokens, hydrateData])
 
@@ -1048,6 +1112,7 @@ function App() {
         const roleOrder = ['customer', 'owner', 'staff', 'admin']
         const loginResults = await Promise.all(roleOrder.map(async (role) => {
           if (!desiredDemoRoles[role]) return [role, null]
+          if (role === 'customer' && supabase) return [role, null]
           if (!backendRequiredForActions) {
             return [role, { token: `offline-demo:${role}`, user: { ...DEMO_USERS[role] } }]
           }
@@ -1061,11 +1126,12 @@ function App() {
           tokens[role] = auth.token
           sessions[role] = auth.user
         })
-        setAuthTokens(tokens)
-        setAccountSessions(sessions)
+        const demoRoles = roleOrder.filter((role) => !(role === 'customer' && supabase))
+        setAuthTokens((current) => ({ ...current, ...Object.fromEntries(demoRoles.map((role) => [role, tokens[role]])) }))
+        setAccountSessions((current) => ({ ...current, ...Object.fromEntries(demoRoles.map((role) => [role, sessions[role] || null])) }))
         setSessionMeta((current) => {
           const next = { ...current }
-          roleOrder.forEach((role) => {
+          demoRoles.forEach((role) => {
             if (!desiredDemoRoles[role]) {
               next[role] = {
                 ...next[role],
@@ -1084,7 +1150,7 @@ function App() {
           })
           return next
         })
-        await hydrateData(tokens, { preserveMessage: false })
+        // hydration runs from the authTokens effect so it always uses the merged tokens
       } catch (error) {
         setUiState((current) => ({ ...current, loading: false, error: error.message || 'Failed to connect to backend.' }))
       }
@@ -1231,7 +1297,7 @@ function App() {
         headers: { Authorization: `Bearer ${authTokens.customer}` },
         body: JSON.stringify({
           shopId: latest.shopId || DEFAULT_SHOP_ID,
-          customer: customerProfile.fullName || DEFAULT_CUSTOMER_NAME,
+          customer: customerProfile.fullName || accountSessions.customer?.name || 'Customer',
           total: checkoutTotal,
           fulfillment: fulfillmentType,
           pickupSlotId: fulfillmentType === 'pickup' ? pickupSlotId : null,
@@ -1343,14 +1409,19 @@ function App() {
   async function handleCustomerLogout() {
     setProfileDrawerOpen(false)
     setProfileHelpOpen(false)
-    setView('accounts')
-    if (supabase && authTokens.customer?.startsWith('supabase:')) {
+    if (supabase) {
+      setUiState((current) => ({ ...current, authUpdating: true, error: '', message: '' }))
+      const backendToken = authTokens.customer
+      if (backendToken) {
+        apiFetch('/api/auth/logout', { method: 'POST', headers: { Authorization: `Bearer ${backendToken}` } }).catch(() => {})
+      }
       await supabase.auth.signOut()
-      setAuthTokens((current) => ({ ...current, customer: '' }))
-      setAccountSessions((current) => ({ ...current, customer: null }))
+      setView('home')
+      setUiState((current) => ({ ...current, authUpdating: false, message: 'Signed out.' }))
       return
     }
     await toggleDemoSession('customer')
+    setView('home')
   }
 
   async function updateOwnerOrderStatus() {
@@ -1555,22 +1626,10 @@ function App() {
   async function toggleDemoSession(role) {
     setUiState((current) => ({ ...current, authUpdating: true, error: '', message: '' }))
     try {
-      if (role === 'customer' && supabase && googleAuthEnabled) {
-        if (authTokens.customer?.startsWith('supabase:')) {
-          await supabase.auth.signOut()
-          setAuthTokens((current) => ({ ...current, customer: '' }))
-          setAccountSessions((current) => ({ ...current, customer: null }))
-          setUiState((current) => ({ ...current, authUpdating: false, message: 'Signed out.' }))
-          return
-        }
-
-        const redirectTo = 'https://cake-builder-prototype.vercel.app'
-        const { error } = await supabase.auth.signInWithOAuth({
-          provider: 'google',
-          options: { redirectTo },
-        })
-        if (error) throw error
+      if (role === 'customer' && supabase) {
         setUiState((current) => ({ ...current, authUpdating: false }))
+        if (authTokens.customer) await handleCustomerLogout()
+        else await startGoogleSignIn()
         return
       }
 
@@ -1613,20 +1672,48 @@ function App() {
       }
 
       await signInDemoRole(role, { message: `${role} demo session reconnected.` })
-      if (role === 'customer') {
-        setGuestMode(false)
-        setView('home')
-      }
+      if (role === 'customer') setGuestMode(false)
       setUiState((current) => ({ ...current, authUpdating: false }))
     } catch (error) {
       setUiState((current) => ({ ...current, authUpdating: false, error: getFriendlyError(error, 'Failed to update demo session.', `${role} demo session`) }))
     }
   }
 
+  // The one signed-out entry flow: any protected action opens the sign-in screen,
+  // remembering where the customer was so they land back there after login.
   function openCustomerSignIn() {
     setGuestMode(false)
+    setAuthReturnView(view === 'auth' ? 'home' : view)
     setView('auth')
     setUiState((current) => ({ ...current, error: '', message: '' }))
+  }
+
+  async function startGoogleSignIn() {
+    setUiState((current) => ({ ...current, authUpdating: true, error: '', message: '' }))
+    saveAuthReturn({ view: view === 'auth' ? authReturnView : view })
+    const { error } = await supabase.auth.signInWithOAuth({
+      provider: 'google',
+      options: { redirectTo: window.location.origin },
+    })
+    if (error) {
+      clearAuthReturn()
+      setUiState((current) => ({ ...current, authUpdating: false, error: 'Could not open Google sign-in. Please try again.' }))
+    }
+  }
+
+  async function continueWithSignIn() {
+    if (supabase) {
+      await startGoogleSignIn()
+      return
+    }
+    setUiState((current) => ({ ...current, authUpdating: true, error: '', message: '' }))
+    try {
+      await signInDemoRole('customer', { message: 'Signed in.' })
+      setView(authReturnView || 'home')
+    } catch (error) {
+      setUiState((current) => ({ ...current, error: getFriendlyError(error, 'Failed to sign in.', 'Customer session') }))
+    }
+    setUiState((current) => ({ ...current, authUpdating: false }))
   }
 
   if (view === 'auth') {
@@ -1636,16 +1723,15 @@ function App() {
           <section className="auth-gate-card">
             <div className="auth-gate-copy">
               <p className="eyebrow">Cake app</p>
-              <h1>Design your cake in minutes</h1>
-              <p className="screen-subcopy">Sign in to save your profile and checkout faster, or continue without signing in to explore first.</p>
+              <h1>Sign in to continue</h1>
+              <p className="screen-subcopy">Sign in to place orders, save addresses, and see your order history. Your cart is kept while you sign in.</p>
+              {uiState.error ? <p className="status-banner error">{uiState.error}</p> : null}
             </div>
             <div className="auth-gate-actions">
-              <button type="button" className="cta" onClick={() => { setGuestMode(false); toggleDemoSession('customer') }} disabled={uiState.authUpdating}>{uiState.authUpdating ? 'Signing in...' : 'Sign in to continue'}</button>
-              <button type="button" className="auth-guest-link" onClick={() => {
-                setDesiredDemoRoles({ customer: false, owner: false, staff: false, admin: false })
-                setGuestMode(true)
-                setView('home')
-              }}>Continue without signing in</button>
+              <button type="button" className="cta" onClick={continueWithSignIn} disabled={uiState.authUpdating || customerAuthStatus === 'checking'}>
+                {uiState.authUpdating ? 'Opening Google...' : customerAuthStatus === 'checking' ? 'Signing you in...' : supabase ? 'Continue with Google' : 'Sign in'}
+              </button>
+              <button type="button" className="auth-guest-link" onClick={() => setView(authReturnView || 'home')}>Not now</button>
             </div>
           </section>
         </div>
@@ -1769,17 +1855,17 @@ function App() {
                         setProfileSection('profile')
                       }}
                     >
-                      <span>{(accountSessions.customer?.name || DEFAULT_CUSTOMER_NAME).slice(0, 1)}</span>
+                      <span>{(accountSessions.customer?.name || 'G').slice(0, 1)}</span>
                     </button>
                   </div>
 
                   {profileDrawerOpen && (
                     <div className="builder-profile-popover account-sheet-popover">
                       <div className="builder-profile-head">
-                        <div className="profile-avatar-large">{(accountSessions.customer?.name || DEFAULT_CUSTOMER_NAME).slice(0, 1)}</div>
+                        <div className="profile-avatar-large">{(accountSessions.customer?.name || 'G').slice(0, 1)}</div>
                         <div>
-                          <strong>{accountSessions.customer?.name || DEFAULT_CUSTOMER_NAME}</strong>
-                          <p>{accountSessions.customer?.email || DEMO_USERS.customer.email}</p>
+                          <strong>{accountSessions.customer?.name || 'Guest'}</strong>
+                          <p>{accountSessions.customer?.email || 'Not signed in'}</p>
                         </div>
                       </div>
 
@@ -1816,7 +1902,7 @@ function App() {
                         {authTokens.customer ? (
                           <button type="button" className="account-logout-button" onClick={handleCustomerLogout} disabled={uiState.authUpdating}>{uiState.authUpdating ? 'Logging out...' : 'Logout'}</button>
                         ) : (
-                          <button type="button" className="account-logout-button" onClick={openCustomerSignIn} disabled={uiState.authUpdating}>{uiState.authUpdating ? 'Reconnecting...' : 'Reconnect customer session'}</button>
+                          <button type="button" className="account-logout-button" onClick={openCustomerSignIn} disabled={uiState.authUpdating}>{uiState.authUpdating ? 'Opening sign-in...' : 'Sign in'}</button>
                         )}
                       </div>
                     </div>
@@ -2356,7 +2442,7 @@ function App() {
 
                 <div className="uber-cart-footer">
                   {!authTokens.customer ? (
-                    <button type="button" className="uber-checkout-btn" onClick={openCustomerSignIn} disabled={uiState.authUpdating}>{uiState.authUpdating ? 'Logging in...' : 'Login to continue'}</button>
+                    <button type="button" className="uber-checkout-btn" onClick={openCustomerSignIn} disabled={uiState.authUpdating || customerAuthStatus === 'checking'}>{customerAuthStatus === 'checking' ? 'Signing you in...' : 'Sign in to checkout'}</button>
                   ) : fulfillmentType === 'pickup' && !selectedPickupSlot ? (
                     <button type="button" className="uber-checkout-btn" disabled>Choose pickup time</button>
                   ) : fulfillmentType === 'delivery' && !selectedAddress ? (
@@ -2564,7 +2650,7 @@ function App() {
                 <button type="button" className="cleaner-profile-row" onClick={() => setProfileSection('details')}>
                   <div>
                     <strong>Full name</strong>
-                    <span>{customerProfile.fullName || accountSessions.customer?.name || DEFAULT_CUSTOMER_NAME}</span>
+                    <span>{customerProfile.fullName || accountSessions.customer?.name || 'Guest'}</span>
                   </div>
                   <em>›</em>
                 </button>
@@ -2620,7 +2706,7 @@ function App() {
                 <button type="button" className="cleaner-profile-row" onClick={() => setProfileSection('security')}>
                   <div>
                     <strong>Logout</strong>
-                    <span>{authTokens.customer ? 'Signed in' : 'Reconnect your account'}</span>
+                    <span>{authTokens.customer ? 'Signed in' : 'Not signed in'}</span>
                   </div>
                   <em>›</em>
                 </button>
@@ -2834,13 +2920,13 @@ function App() {
                 <button type="button" className="pill" onClick={() => setProfileSection('profile')}>Back</button>
                 <strong>Logout</strong>
               </div>
-              <div className="list-row"><span>Status</span><strong>{authTokens.customer ? 'Connected' : 'Needs reconnect'}</strong></div>
+              <div className="list-row"><span>Status</span><strong>{authTokens.customer ? 'Signed in' : 'Not signed in'}</strong></div>
               <div className="list-row"><span>Device</span><strong>{sessionMeta.customer?.deviceLabel || 'This browser'}</strong></div>
               <div className="pill-row">
                 {authTokens.customer ? (
                   <button type="button" className="pill active" onClick={handleCustomerLogout} disabled={uiState.authUpdating}>{uiState.authUpdating ? 'Logging out...' : 'Logout'}</button>
                 ) : (
-                  <button type="button" className="pill active" onClick={openCustomerSignIn} disabled={uiState.authUpdating}>{uiState.authUpdating ? 'Reconnecting...' : 'Reconnect'}</button>
+                  <button type="button" className="pill active" onClick={openCustomerSignIn} disabled={uiState.authUpdating}>{uiState.authUpdating ? 'Opening sign-in...' : 'Sign in'}</button>
                 )}
               </div>
             </div>}

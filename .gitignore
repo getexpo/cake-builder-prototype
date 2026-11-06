@@ -36,3 +36,6 @@ tmp_replace_profile.py
 tmp_ui_cleanup.mjs
 tmp_ui_cleanup.py
 extract_profile.mjs
+
+# local auth-redesign backups and smoke tests
+.auth-redesign-backup/

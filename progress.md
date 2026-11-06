@@ -1,5 +1,14 @@
 # Progress Log
 
+## 2026-06-17
+- Removed the fake prefilled checkout defaults in `src/App.jsx`: payment card, customer profile, saved addresses, and saved card state now start empty instead of auto-pretending the user already has a real customer profile and payment method.
+- Restructured the customer profile surface into a cleaner real-app shape: the main profile now summarizes account info and routes into clearer sub-areas for past orders, saved cakes, addresses, and payments, instead of dumping all address/card editing into one cluttered default screen.
+- Tightened checkout payment behavior so the pay action now requires a real address and card entry (or a genuinely saved one) instead of passing through with canned demo data.
+- Reworked the account menu again to match Rohit's Uber-style expectation more closely: the account page is now a tap-to-open list of rows like Name, Email, Orders, Saved Cakes, Addresses, Payments, Settings, and Help, with one detail section shown at a time instead of 4 summary boxes inside the main profile card.
+- New debugging evidence from Rohit: on mobile/WhatsApp browser the home screen flashes for about one second and then disappears, which means the app shell renders before a later frontend/layout regression wipes out the visible surface.
+- Reverted the profile/menu regressions and then restored `src/App.jsx` and `src/App.css` all the way back to the last known-good frontend baseline at commit `1652ffd`, while keeping the newer app-safe `src/index.css` shell styles and live deploy plumbing.
+- Fresh verification passed with `npm run build` in `cake-builder-prototype` after restoring that known-good baseline.
+
 ## 2026-06-01
 - Closed the next real high-priority account-system gap instead of leaving the security surface at coarse logout controls. `cake-builder-prototype/src/App.jsx` now shows backend session entries directly inside the session center and lets the operator revoke a specific non-current session per role, not just sign out the current device or blanket-revoke every other session.
 - Tightened proof so this claim is not UI theater: `cake-platform-backend/verify-integration.js` now verifies both single-session revoke and sign-out-other-sessions behavior against the current backend contract.
@@ -126,3 +135,15 @@
 - Ran a follow-up docs/tracker audit for consistency and resume clarity. Updated `README.md` to include `pillar-status.md` in the core resume path and corrected `findings.md` so the older Google Sheet row-count verification is clearly time-scoped rather than mistaken for current local tracker parity.
 - Closed a real owner-operations/frontend integration gap in `src/App.jsx`: the owner panel no longer treats `picked_up` as a generic status button, and now calls the dedicated backend `POST /api/owner/orders/:id/complete-pickup` flow instead while surfacing pickup completion timestamp and actor metadata on the selected order.
 - Re-verified this pass with fresh `npm run lint`, `npm run build`, and `node verify-integration.js` against an isolated backend instance on port `4164`; the proof run completed saved-design create/list, reorder, owner queue/detail/status, pickup completion metadata, notifications, and pickup-slot patch successfully.
+
+## 2026-11-06 - Customer auth redesign (Claude)
+Root causes of the June login loop, all fixed in `src/App.jsx` (not yet committed/deployed):
+- Backend never accepted Google/Supabase tokens; a demo "Emma Johnson" customer login silently overwrote the Google token (desiredDemoRoles.customer -> bootstrap -> /api/auth/login). Customer demo login is now disabled whenever Supabase is configured.
+- `onAuthStateChange` jumped to Home on every event (incl. token refresh) and to the auth gate on sign-out. Now: refresh events ignored, sign-in returns the user to the screen they were on, sign-out lands on Home.
+- Cart lived only in memory and was lost on the Google redirect. Now persisted in localStorage (malformed items dropped).
+- Signed-out state kept the previous profile and fell back to fake demo name/email. Now cleared; shows "Guest".
+- Out-of-order hydrate responses could overwrite fresher data. Added a sequence guard.
+- Separate bug: hydrateData Promise.all had one extra `/api/profile` call, shifting every later result by one (admin disputes showed admin team data). Removed.
+Flow: app opens on Home as guest -> any protected action opens the sign-in screen -> Continue with Google -> back on the same screen, signed in. "Not now" returns to where you were.
+Backend: new `POST /api/auth/google` exchanges a Supabase access token for a backend customer session (find-or-create by Google user id). `/api/auth/login` refuses Google-linked emails. Needs `SUPABASE_URL` + `SUPABASE_ANON_KEY` env vars on Render.
+Verified: eslint (0 errors), SSR render of all 7 views, backend route tests incl. mocked Supabase success path. Not yet verified: full Vite build (Windows-only node_modules in the Linux sandbox) and real Google login on a phone.
