@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { createClient } from '@supabase/supabase-js'
 import './App.css'
+import CustomerApp from './CustomerApp.jsx'
 
 const ENV_API_BASE_URL = import.meta.env.VITE_API_BASE_URL?.trim()
 const SUPABASE_URL = import.meta.env.VITE_SUPABASE_URL?.trim()
@@ -870,6 +871,7 @@ function App() {
     fulfillmentType === 'pickup' && selectedPickupSlot && !getPickupSlotState(selectedPickupSlot).selectable ? 'Choose an available pickup slot that is not full, paused, or expired' : null,
     fulfillmentType === 'pickup' && selectedPickupSlot && selectedPickupRemaining <= 0 ? 'Choose a slot with remaining capacity' : null,
     fulfillmentType === 'delivery' && !selectedAddress?.line1 ? 'Choose a delivery address' : null,
+    authTokens.customer && cart.length && String(paymentCard.last4 || '').length !== 4 ? 'Add a payment card' : null,
   ].filter(Boolean)
   const checkoutReady = checkoutBlockers.length === 0
 
@@ -931,6 +933,10 @@ function App() {
         team: shop.teamSize || 0,
         lastBulkTemplateKey: shop.lastBulkTemplateKey || '',
         lastBulkAppliedAt: shop.lastBulkAppliedAt || '',
+        ...(() => {
+          const fallback = defaultOwnerLocations.find((location) => location.id === shop.id)
+          return fallback ? { capability: fallback.capability, city: fallback.city, hero: fallback.hero, menuSummary: fallback.menuSummary } : {}
+        })(),
       }))
 
       setOwnerLocations(normalizedLocations.length ? normalizedLocations : defaultOwnerLocations)
@@ -1716,27 +1722,20 @@ function App() {
     setUiState((current) => ({ ...current, authUpdating: false }))
   }
 
-  if (view === 'auth') {
-    return (
-      <div className="page auth-gate-page">
-        <div className="phone-frame auth-gate-frame">
-          <section className="auth-gate-card">
-            <div className="auth-gate-copy">
-              <p className="eyebrow">Cake app</p>
-              <h1>Sign in to continue</h1>
-              <p className="screen-subcopy">Sign in to place orders, save addresses, and see your order history. Your cart is kept while you sign in.</p>
-              {uiState.error ? <p className="status-banner error">{uiState.error}</p> : null}
-            </div>
-            <div className="auth-gate-actions">
-              <button type="button" className="cta" onClick={continueWithSignIn} disabled={uiState.authUpdating || customerAuthStatus === 'checking'}>
-                {uiState.authUpdating ? 'Opening Google...' : customerAuthStatus === 'checking' ? 'Signing you in...' : supabase ? 'Continue with Google' : 'Sign in'}
-              </button>
-              <button type="button" className="auth-guest-link" onClick={() => setView(authReturnView || 'home')}>Not now</button>
-            </div>
-          </section>
-        </div>
-      </div>
-    )
+  if (view !== 'owner') {
+    const customerCtx = {
+      view, setView, bakeries: ownerLocations, presets: fakeBakeryPresets, cart, setCart, uiState, setUiState,
+      customerShopId, setCustomerShopId, pickupSlots, formatPickupWindow, formatStatus, getPickupSlotState, toDesignSummary,
+      fulfillmentType, setFulfillmentType, pickupSlotId, setPickupSlotId, paymentCard, setPaymentCard,
+      customerProfile, customerOrders, savedDesigns, authTokens, accountSessions, customerAuthStatus, authReturnView,
+      checkoutStage, setCheckoutStage, latestPlacedOrder, selectedAddress, setSelectedAddressId,
+      addressDraft, setAddressDraft, cardDraft, setCardDraft,
+      cartSubtotal, deliveryFee, serviceFee, gstHst, checkoutTotal, checkoutShopId, checkoutShopLabel,
+      sortedPickupSlots, checkoutBlockers, checkoutReady, googleEnabled: Boolean(supabase),
+      submitCartOrder, addProfileAddress, addProfileCard, updateCartItemQuantity, handleCustomerLogout,
+      openCustomerSignIn, continueWithSignIn,
+    }
+    return <CustomerApp ctx={customerCtx} />
   }
 
   return (
