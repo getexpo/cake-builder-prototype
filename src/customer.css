@@ -247,3 +247,12 @@
 
 /* spacing helpers last so they win over element margins */
 .ca-root .ca-mt-12 { margin-top: 12px; } .ca-root .ca-mt-16 { margin-top: 16px; } .ca-root .ca-mt-20 { margin-top: 20px; }
+
+/* build-your-own item page */
+.ca-option-section { padding: 20px 0; border-bottom: 8px solid var(--soft); margin: 0 -20px; padding-left: 20px; padding-right: 20px; }
+.ca-option-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 12px; }
+.ca-option-head .ca-h3 { margin: 0; }
+.ca-option-note { font-size: 12px; font-weight: 700; color: var(--muted); background: var(--soft); border-radius: 999px; padding: 3px 10px; }
+.ca-stack-view.is-banner { height: 220px; border-radius: 0; }
+.ca-layer-controls.is-boxed { margin-top: 0; }
+.ca-root .ca-mb-10 { margin-bottom: 10px; }

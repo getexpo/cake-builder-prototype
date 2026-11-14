@@ -50,6 +50,12 @@ const ORDER_STEPS = [
 
 const LEGACY_VIEWS = { builder: 'build', saved: 'orders', accounts: 'account' }
 
+function scrollTop() {
+  if (typeof document === 'undefined') return
+  document.querySelector('.ca-root')?.scrollTo(0, 0)
+  window.scrollTo(0, 0)
+}
+
 function money(value) {
   return `$${Number(value || 0).toFixed(2)}`
 }
@@ -154,6 +160,15 @@ function ShapeIcon({ id }) {
     <svg className="ca-shape" width="84" height="84" viewBox="0 0 84 84" fill="none" stroke="currentColor" strokeWidth="3" strokeLinejoin="round" aria-hidden="true">
       {shapes[id]}
     </svg>
+  )
+}
+
+function Section({ title, note, children }) {
+  return (
+    <section className="ca-option-section">
+      <div className="ca-option-head"><h2 className="ca-h3">{title}</h2>{note ? <span className="ca-option-note">{note}</span> : null}</div>
+      {children}
+    </section>
   )
 }
 
@@ -264,7 +279,7 @@ export default function CustomerApp({ ctx }) {
     setUiState((current) => ({ ...current, error: '', message: '' }))
     if (next === 'account') setAccountPage('main')
     setView(next)
-    if (typeof window !== 'undefined') window.scrollTo(0, 0)
+    scrollTop()
   }
 
   function openBakery(id) {
@@ -340,7 +355,6 @@ export default function CustomerApp({ ctx }) {
   }
 
   function renderHome() {
-    const buildable = bakeries.filter((item) => layerLimitFor(item) > 0)
     return (
       <div className="ca-screen has-nav">
         <div className="ca-pad ca-stack-14">
@@ -358,16 +372,6 @@ export default function CustomerApp({ ctx }) {
           <button type="button" className="ca-search-fake" onClick={() => go('search')}>
             <Icon name="search" size={18} /><span>Search cakes and bakeries</span>
           </button>
-          {buildable.length ? (
-            <button type="button" className="ca-build-hero" onClick={() => startBuild(buildable.length === 1 ? buildable[0].id : '')}>
-              <span className="ca-build-hero-icon"><Icon name="cake" size={30} /></span>
-              <span className="ca-build-hero-text">
-                <strong>Build your own cake</strong>
-                <span>Pick the sponge, layers and toppings. A local bakery makes it fresh.</span>
-              </span>
-              <Icon name="chevron" size={20} />
-            </button>
-          ) : null}
         </div>
         <div className="ca-pad ca-section">
           <h2 className="ca-h2">Bakeries near you</h2>
@@ -437,17 +441,17 @@ export default function CustomerApp({ ctx }) {
           </div>
         </div>
         <div className="ca-pad ca-section">
+          <h2 className="ca-h2">Menu</h2>
           {limit ? (
             <button type="button" className="ca-menu-row" onClick={() => startBuild(bakery.id)}>
               <span className="ca-menu-text">
-                <span className="ca-menu-title">Design your own cake <span className="ca-chip is-accent">Custom</span></span>
-                <span className="ca-muted">Pick shape, sponge, layers, fillings and toppings</span>
+                <span className="ca-menu-title">Build your own cake</span>
+                <span className="ca-muted">Choose the shape, sponge, up to {limit} layers, fillings and toppings</span>
                 <span className="ca-menu-price">From {money(SHAPES[0].price + PRICE_PER_LAYER * DEFAULT_LAYERS)}</span>
               </span>
-              <span className="ca-menu-thumb is-accent"><Icon name="cake" size={34} /></span>
+              <span className="ca-menu-thumb is-accent"><Icon name="cake" size={30} /><span className="ca-plus" aria-hidden="true"><Icon name="plus" size={16} /></span></span>
             </button>
           ) : null}
-          <h2 className="ca-h2 ca-mt-12">Ready-made cakes</h2>
           {items.length ? items.map((item) => (
             <button key={item.id} type="button" className="ca-menu-row" onClick={() => { setItemId(item.id); setItemNote(''); go('item') }}>
               <span className="ca-menu-text">
@@ -517,13 +521,14 @@ export default function CustomerApp({ ctx }) {
 
   function renderBuild() {
     const limit = layerLimitFor(bakery)
-    const buildable = bakeries.filter((item) => layerLimitFor(item) > 0)
+    if (!limit) return renderBakery()
     const price = buildPrice(build)
+    const shapes = shapesFor(bakery)
     const set = (patch) => setBuild((current) => ({ ...current, ...patch }))
-    const goStep = (step) => { set({ step }); if (typeof window !== 'undefined') window.scrollTo(0, 0) }
-    const back = () => (build.step === 1 ? go('home') : goStep(build.step - 1))
+    const atMax = build.layerCount >= limit
+    const bandHeight = build.layerCount > 6 ? 14 : build.layerCount > 4 ? 18 : 24
     const setLayers = (count) => {
-      const next = Math.min(Math.max(count, 1), limit || 1)
+      const next = Math.min(Math.max(count, 1), limit)
       setBuild((current) => ({
         ...current,
         layerCount: next,
@@ -557,110 +562,10 @@ export default function CustomerApp({ ctx }) {
       })
     }
 
-    let body = null
-    let canContinue = true
-    if (build.step === 1) {
-      canContinue = layerLimitFor(bakery) > 0
-      body = (
-        <>
-          <div className="ca-step-head"><h1 className="ca-h1">Where should we bake it?</h1><p className="ca-muted">Each bakery offers its own options and decides how big a cake it can make.</p></div>
-          <div className="ca-stack-12">
-            {bakeries.map((item) => {
-              const itemLimit = layerLimitFor(item)
-              const slot = nextSlotFor[item.id]
-              if (!itemLimit) {
-                return (
-                  <div key={item.id} className="ca-option-card is-disabled">
-                    <Photo tint="#F5F5F4" className="ca-thumb" />
-                    <span className="ca-option-text"><strong>{item.name}</strong><span className="ca-muted">Ready-made cakes only</span>
-                      <button type="button" className="ca-link" onClick={() => openBakery(item.id)}>See their menu instead</button></span>
-                  </div>
-                )
-              }
-              const selected = item.id === bakery.id
-              return (
-                <button key={item.id} type="button" aria-pressed={selected} className={`ca-option-card ${selected ? 'is-selected' : ''}`} onClick={() => {
-                  setCustomerShopId(item.id)
-                  setBuild((current) => {
-                    const layerCount = Math.min(current.layerCount, itemLimit)
-                    const shape = shapesFor(item).some((entry) => entry.id === current.shape) ? current.shape : 'round'
-                    return { ...current, shape, layerCount, fillings: current.fillings.slice(0, layerCount) }
-                  })
-                }}>
-                  <Photo tint="#EDE5F0" className="ca-thumb" />
-                  <span className="ca-option-text">
-                    <strong>{item.name}</strong>
-                    <span className="ca-muted">{item.capability.fullCustom ? 'Full custom builder' : 'Builder with set shapes'}</span>
-                    <span className="ca-chips"><span className="ca-chip is-accent">Up to {itemLimit} layers</span>{slot ? <span className="ca-chip">Next: {ctx.formatPickupWindow(slot)}</span> : null}</span>
-                  </span>
-                  {selected ? <span className="ca-check"><Icon name="check" size={16} /></span> : null}
-                </button>
-              )
-            })}
-          </div>
-          {!buildable.length ? <p className="ca-muted">No bakery offers custom cakes yet.</p> : null}
-        </>
-      )
-    } else if (build.step === 2) {
-      const shapes = shapesFor(bakery)
-      body = (
-        <>
-          <div className="ca-step-head"><h1 className="ca-h1">Pick your cake</h1><p className="ca-muted">Choose a shape, then a size.</p></div>
-          <div className="ca-grid-2">
-            {shapes.map((shape) => (
-              <button key={shape.id} type="button" aria-pressed={build.shape === shape.id} className={`ca-tile ${build.shape === shape.id ? 'is-selected' : ''}`} onClick={() => set({ shape: shape.id })}>
-                <ShapeIcon id={shape.id} />
-                <span className="ca-tile-row"><strong>{shape.label}</strong><span>{money(shape.price)}</span></span>
-              </button>
-            ))}
-          </div>
-          <h2 className="ca-h3 ca-mt-20">Size</h2>
-          <div className="ca-grid-3">
-            {SIZES.map((size) => (
-              <button key={size.id} type="button" aria-pressed={build.size === size.id} className={`ca-size ${build.size === size.id ? 'is-selected' : ''}`} onClick={() => set({ size: size.id })}>
-                <strong>{size.label}</strong><span>{size.price ? `+${money(size.price)}` : 'Included'}</span>
-              </button>
-            ))}
-          </div>
-        </>
-      )
-    } else if (build.step === 3) {
-      body = (
-        <>
-          <div className="ca-step-head"><h1 className="ca-h1">What kind of cake?</h1><p className="ca-muted">This is the main sponge for every layer.</p></div>
-          <div className="ca-stack-10">
-            {FLAVORS.map((flavor) => {
-              const selected = build.flavor === flavor.id
-              return (
-                <div key={flavor.id} className={`ca-flavor ${selected ? 'is-selected' : ''}`}>
-                  <button type="button" aria-pressed={selected} className="ca-flavor-row" onClick={() => set({ flavor: flavor.id })}>
-                    <span className={`ca-swatch ${flavor.swatch === 'marble' ? 'is-marble' : ''}`} style={flavor.swatch === 'marble' ? undefined : { background: flavor.swatch }} aria-hidden="true" />
-                    <strong>{flavor.label}</strong>
-                    <span className="ca-muted">{flavor.price ? `+${money(flavor.price)}` : 'Included'}</span>
-                  </button>
-                  {selected && flavor.id === 'chocolate' ? (
-                    <div className="ca-subchoice">
-                      <span className="ca-small ca-strong-muted">Which chocolate?</span>
-                      <div className="ca-grid-3">
-                        {CHOCOLATES.map((kind) => (
-                          <button key={kind} type="button" aria-pressed={build.chocolate === kind} className={`ca-pill ${build.chocolate === kind ? 'is-dark' : ''}`} onClick={() => set({ chocolate: kind })}>{kind}</button>
-                        ))}
-                      </div>
-                    </div>
-                  ) : null}
-                </div>
-              )
-            })}
-          </div>
-        </>
-      )
-    } else if (build.step === 4) {
-      const atMax = build.layerCount >= limit
-      const bandHeight = build.layerCount > 6 ? 14 : build.layerCount > 4 ? 18 : 24
-      body = (
-        <>
-          <div className="ca-step-head"><h1 className="ca-h1">Build your layers</h1><p className="ca-muted">Most cakes have {DEFAULT_LAYERS}. {bakery.name} can make up to {limit}.</p></div>
-          <div className="ca-stack-view" role="img" aria-label={`${build.layerCount} layer ${flavorName(build)} cake`}>
+    return (
+      <div className="ca-screen">
+        <div className="ca-banner">
+          <div className="ca-stack-view is-banner" role="img" aria-label={`${build.layerCount} layer ${flavorName(build)} cake`}>
             <div className="ca-stack">
               <div className="ca-stack-top" />
               {Array.from({ length: build.layerCount }, (_, index) => (
@@ -669,92 +574,135 @@ export default function CustomerApp({ ctx }) {
               <div className="ca-stack-plate" />
             </div>
           </div>
-          <div className="ca-layer-controls">
-            <div className="ca-stack-2">
-              <strong>{build.layerCount} layers</strong>
-              <span className={atMax ? 'ca-warn ca-small' : 'ca-muted ca-small'}>{atMax ? 'That’s the most this bakery can make' : `+${money(PRICE_PER_LAYER)} per layer`}</span>
-            </div>
-            <div className="ca-stepper">
-              <button type="button" aria-label="Remove a layer" disabled={build.layerCount <= 1} onClick={() => setLayers(build.layerCount - 1)}>−</button>
-              <button type="button" aria-label="Add a layer" className="is-dark" disabled={atMax} onClick={() => setLayers(build.layerCount + 1)}>+</button>
-            </div>
-          </div>
-          <div className="ca-row-between ca-mt-16">
-            <h2 className="ca-h3">Filling between layers</h2>
-            <label className="ca-check-label">
-              <input type="checkbox" checked={build.sameFilling} onChange={(event) => set({ sameFilling: event.target.checked, fillings: event.target.checked ? build.fillings.map(() => build.fillings[0]) : build.fillings })} />
-              Same for all
-            </label>
-          </div>
-          <ul className="ca-layer-list">
-            {(build.sameFilling ? [build.fillings[0]] : build.fillings).map((filling, index) => (
-              <li key={index}>
-                <label htmlFor={`ca-fill-${index}`} className="ca-layer-label">{build.sameFilling ? 'Every layer' : `Layer ${index + 1}`}</label>
-                <select
-                  id={`ca-fill-${index}`}
-                  className="ca-select"
-                  value={filling}
-                  onChange={(event) => setBuild((current) => ({
-                    ...current,
-                    fillings: current.sameFilling ? current.fillings.map(() => event.target.value) : current.fillings.map((value, i) => (i === index ? event.target.value : value)),
-                  }))}
-                >
-                  {FILLINGS.map((option) => <option key={option} value={option}>{option}</option>)}
-                </select>
-              </li>
-            ))}
-          </ul>
-        </>
-      )
-    } else {
-      body = (
-        <>
-          <div className="ca-step-head"><h1 className="ca-h1">Finish it off</h1></div>
-          <h2 className="ca-h3">Outside frosting</h2>
-          <div className="ca-grid-3">
-            {FROSTINGS.map((frosting) => (
-              <button key={frosting.id} type="button" aria-pressed={build.frosting === frosting.id} className={`ca-size ${build.frosting === frosting.id ? 'is-selected' : ''}`} onClick={() => set({ frosting: frosting.id })}>
-                <strong className="ca-small-strong">{frosting.label}</strong><span>{frosting.price ? `+${money(frosting.price)}` : 'Included'}</span>
-              </button>
-            ))}
-          </div>
-          <h2 className="ca-h3 ca-mt-16">Toppings</h2>
-          <div className="ca-wrap">
-            {TOPPINGS.map((topping) => {
-              const on = build.toppings.includes(topping.id)
-              return (
-                <button key={topping.id} type="button" aria-pressed={on} className={`ca-pill ${on ? 'is-dark' : ''}`} onClick={() => set({ toppings: on ? build.toppings.filter((id) => id !== topping.id) : [...build.toppings, topping.id] })}>
-                  {topping.label} · +{money(topping.price)}
+          <button type="button" className="ca-float-btn ca-float-left" aria-label="Close" onClick={() => go('bakery')}><Icon name="close" size={18} /></button>
+        </div>
+        <div className="ca-pad ca-stack-8 ca-pt-16">
+          <h1 className="ca-h1">Build your own cake</h1>
+          <span className="ca-price-lg">From {money(SHAPES[0].price + PRICE_PER_LAYER * DEFAULT_LAYERS)}</span>
+          <p className="ca-muted ca-lh">Choose everything: shape, sponge, layers, fillings and toppings. {bakery.name} bakes it fresh for your pickup time.</p>
+        </div>
+
+        <div className="ca-pad ca-pb-24">
+          <Section title="Shape" note="Required">
+            <div className="ca-grid-2">
+              {shapes.map((shape) => (
+                <button key={shape.id} type="button" aria-pressed={build.shape === shape.id} className={`ca-tile ${build.shape === shape.id ? 'is-selected' : ''}`} onClick={() => set({ shape: shape.id })}>
+                  <ShapeIcon id={shape.id} />
+                  <span className="ca-tile-row"><strong>{shape.label}</strong><span>{money(shape.price)}</span></span>
                 </button>
-              )
-            })}
-          </div>
-          <label htmlFor="ca-build-msg" className="ca-label ca-mt-16">Message on top <span className="ca-muted">· optional</span></label>
-          <input id="ca-build-msg" className="ca-input" maxLength={40} placeholder="e.g. Happy 30th, Maya!" value={build.message} onChange={(event) => set({ message: event.target.value })} />
+              ))}
+            </div>
+          </Section>
+
+          <Section title="Size" note="Required">
+            <div className="ca-grid-3">
+              {SIZES.map((size) => (
+                <button key={size.id} type="button" aria-pressed={build.size === size.id} className={`ca-size ${build.size === size.id ? 'is-selected' : ''}`} onClick={() => set({ size: size.id })}>
+                  <strong>{size.label}</strong><span>{size.price ? `+${money(size.price)}` : 'Included'}</span>
+                </button>
+              ))}
+            </div>
+          </Section>
+
+          <Section title="Cake flavour" note="Required">
+            <div className="ca-stack-10">
+              {FLAVORS.map((flavor) => {
+                const selected = build.flavor === flavor.id
+                return (
+                  <div key={flavor.id} className={`ca-flavor ${selected ? 'is-selected' : ''}`}>
+                    <button type="button" aria-pressed={selected} className="ca-flavor-row" onClick={() => set({ flavor: flavor.id })}>
+                      <span className={`ca-swatch ${flavor.swatch === 'marble' ? 'is-marble' : ''}`} style={flavor.swatch === 'marble' ? undefined : { background: flavor.swatch }} aria-hidden="true" />
+                      <strong>{flavor.label}</strong>
+                      <span className="ca-muted">{flavor.price ? `+${money(flavor.price)}` : 'Included'}</span>
+                    </button>
+                    {selected && flavor.id === 'chocolate' ? (
+                      <div className="ca-subchoice">
+                        <span className="ca-small ca-strong-muted">Which chocolate?</span>
+                        <div className="ca-grid-3">
+                          {CHOCOLATES.map((kind) => (
+                            <button key={kind} type="button" aria-pressed={build.chocolate === kind} className={`ca-pill ${build.chocolate === kind ? 'is-dark' : ''}`} onClick={() => set({ chocolate: kind })}>{kind}</button>
+                          ))}
+                        </div>
+                      </div>
+                    ) : null}
+                  </div>
+                )
+              })}
+            </div>
+          </Section>
+
+          <Section title="Layers" note={`Up to ${limit} at this bakery`}>
+            <div className="ca-layer-controls is-boxed">
+              <div className="ca-stack-2">
+                <strong>{build.layerCount} layers</strong>
+                <span className={atMax ? 'ca-warn ca-small' : 'ca-muted ca-small'}>{atMax ? 'That’s the most this bakery can make' : `+${money(PRICE_PER_LAYER)} per layer`}</span>
+              </div>
+              <div className="ca-stepper">
+                <button type="button" aria-label="Remove a layer" disabled={build.layerCount <= 1} onClick={() => setLayers(build.layerCount - 1)}>−</button>
+                <button type="button" aria-label="Add a layer" className="is-dark" disabled={atMax} onClick={() => setLayers(build.layerCount + 1)}>+</button>
+              </div>
+            </div>
+          </Section>
+
+          <Section title="Filling between layers">
+            <label className="ca-check-label ca-mb-10">
+              <input type="checkbox" checked={build.sameFilling} onChange={(event) => set({ sameFilling: event.target.checked, fillings: event.target.checked ? build.fillings.map(() => build.fillings[0]) : build.fillings })} />
+              Same filling in every layer
+            </label>
+            <ul className="ca-layer-list">
+              {(build.sameFilling ? [build.fillings[0]] : build.fillings).map((filling, index) => (
+                <li key={index}>
+                  <label htmlFor={`ca-fill-${index}`} className="ca-layer-label">{build.sameFilling ? 'Every layer' : `Layer ${index + 1}`}</label>
+                  <select
+                    id={`ca-fill-${index}`}
+                    className="ca-select"
+                    value={filling}
+                    onChange={(event) => setBuild((current) => ({
+                      ...current,
+                      fillings: current.sameFilling ? current.fillings.map(() => event.target.value) : current.fillings.map((value, i) => (i === index ? event.target.value : value)),
+                    }))}
+                  >
+                    {FILLINGS.map((option) => <option key={option} value={option}>{option}</option>)}
+                  </select>
+                </li>
+              ))}
+            </ul>
+          </Section>
+
+          <Section title="Outside frosting" note="Required">
+            <div className="ca-grid-3">
+              {FROSTINGS.map((frosting) => (
+                <button key={frosting.id} type="button" aria-pressed={build.frosting === frosting.id} className={`ca-size ${build.frosting === frosting.id ? 'is-selected' : ''}`} onClick={() => set({ frosting: frosting.id })}>
+                  <strong className="ca-small-strong">{frosting.label}</strong><span>{frosting.price ? `+${money(frosting.price)}` : 'Included'}</span>
+                </button>
+              ))}
+            </div>
+          </Section>
+
+          <Section title="Toppings" note="Optional">
+            <div className="ca-wrap">
+              {TOPPINGS.map((topping) => {
+                const on = build.toppings.includes(topping.id)
+                return (
+                  <button key={topping.id} type="button" aria-pressed={on} className={`ca-pill ${on ? 'is-dark' : ''}`} onClick={() => set({ toppings: on ? build.toppings.filter((id) => id !== topping.id) : [...build.toppings, topping.id] })}>
+                    {topping.label} · +{money(topping.price)}
+                  </button>
+                )
+              })}
+            </div>
+          </Section>
+
+          <Section title="Message on top" note="Optional">
+            <input id="ca-build-msg" aria-label="Message on top" className="ca-input" maxLength={40} placeholder="e.g. Happy 30th, Maya!" value={build.message} onChange={(event) => set({ message: event.target.value })} />
+          </Section>
+
           <div className="ca-summary ca-mt-16">
             <strong>Your cake</strong>
             <span>{buildSummary(build)}</span>
-            <span className="ca-muted">From {bakery.name}. The bakery confirms your time at checkout.</span>
           </div>
-        </>
-      )
-    }
-
-    return (
-      <div className="ca-screen">
-        <div className="ca-step-bar">
-          <button type="button" className="ca-icon-btn" aria-label="Back" onClick={back}><Icon name="back" /></button>
-          <span className="ca-small ca-strong-muted">Step {build.step} of 5{build.step > 1 ? ` · ${bakery.name}` : ''}</span>
         </div>
-        <div className="ca-progress" aria-hidden="true"><div style={{ width: `${build.step * 20}%` }} /></div>
-        <div className="ca-pad ca-pb-24">{body}</div>
         <StickyBar>
-          <div className="ca-so-far"><span className="ca-small ca-muted">So far</span><strong>{money(price)}</strong></div>
-          {build.step < 5 ? (
-            <button type="button" className="ca-btn ca-flex-1" disabled={!canContinue} onClick={() => goStep(build.step + 1)}>Continue</button>
-          ) : (
-            <button type="button" className="ca-btn ca-flex-1" onClick={addToCart}>Add to cart · {money(price)}</button>
-          )}
+          <button type="button" className="ca-btn" onClick={addToCart}>Add to cart · {money(price)}</button>
         </StickyBar>
       </div>
     )
