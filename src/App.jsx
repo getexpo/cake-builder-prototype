@@ -456,6 +456,7 @@ function getFriendlyError(error, fallback, roleLabel = 'this account') {
 }
 
 function toDesignSummary(config = {}) {
+  if (config.summary) return config.summary
   const typeLabel = cakeTypes.find((type) => type.id === config.cakeType)?.label || config.cakeType || 'Cake'
   return `${config.occasion || 'Custom'} · ${typeLabel} · ${config.layerCount || 1} layers`
 }

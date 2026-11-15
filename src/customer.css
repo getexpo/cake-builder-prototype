@@ -256,3 +256,11 @@
 .ca-stack-view.is-banner { height: 220px; border-radius: 0; }
 .ca-layer-controls.is-boxed { margin-top: 0; }
 .ca-root .ca-mb-10 { margin-bottom: 10px; }
+
+/* shop-type filter chips */
+.ca-cats { display: flex; gap: 8px; overflow-x: auto; padding: 14px 20px 2px; scrollbar-width: none; -webkit-overflow-scrolling: touch; }
+.ca-cats::-webkit-scrollbar { display: none; }
+.ca-cat { flex: none; min-height: 38px; padding: 0 14px; border-radius: 999px; border: 1px solid var(--line); background: #FFFFFF; font-size: 14px; font-weight: 600; white-space: nowrap; }
+.ca-cat.is-active { background: var(--ink); border-color: var(--ink); color: #FFFFFF !important; }
+.ca-pill:disabled { opacity: 0.4; }
+.ca-store-photo { color: rgba(28, 25, 23, 0.35); }

@@ -1,4 +1,5 @@
-import { useMemo, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
+import { CATEGORIES, SHOPS } from './catalog.js'
 import './customer.css'
 
 // Customer-facing app (redesign). All data and actions come from App via `ctx`,
@@ -19,10 +20,10 @@ const SIZES = [
   { id: '10', label: '10"', price: 30 },
 ]
 const FLAVORS = [
-  { id: 'vanilla', label: 'Vanilla', sponge: 'Vanilla sponge', price: 0, swatch: '#F6E7C1' },
-  { id: 'chocolate', label: 'Chocolate', sponge: 'Chocolate sponge', price: 4, swatch: '#5B3A29' },
-  { id: 'red-velvet', label: 'Red velvet', sponge: 'Red velvet', price: 6, swatch: '#9F1D2C' },
-  { id: 'marble', label: 'Marble', sponge: 'Marble', price: 5, swatch: 'marble' },
+  { id: 'vanilla', label: 'Vanilla', price: 0, swatch: '#F6E7C1' },
+  { id: 'chocolate', label: 'Chocolate', price: 4, swatch: '#5B3A29' },
+  { id: 'red-velvet', label: 'Red velvet', price: 6, swatch: '#9F1D2C' },
+  { id: 'marble', label: 'Marble', price: 5, swatch: 'marble' },
 ]
 const CHOCOLATES = ['Milk', 'Dark', 'White']
 const FILLINGS = ['Vanilla cream', 'Chocolate ganache', 'Strawberry jam', 'Cream cheese']
@@ -68,26 +69,47 @@ function readSettings() {
   }
 }
 
-function layerLimitFor(bakery) {
-  if (!bakery?.capability) return 0
-  if (bakery.capability.fullCustom) return 10
-  if (bakery.capability.presetsCustomizable) return 4
-  return 0
+function isCakeBuilder(shop) {
+  return shop?.builder?.kind === 'cake'
 }
 
-function shapesFor(bakery) {
-  return bakery?.capability?.fullCustom ? SHAPES : SHAPES.filter((shape) => ['round', 'heart'].includes(shape.id))
+function layerLimitFor(shop) {
+  return isCakeBuilder(shop) ? shop.builder.maxLayers : 0
 }
 
-function newBuild() {
+function shapesFor(shop) {
+  const allowed = shop?.builder?.shapes || ['round', 'heart']
+  return SHAPES.filter((shape) => allowed.includes(shape.id))
+}
+
+function flavoursFor(shop) {
+  return shop?.builder?.flavours || FLAVORS
+}
+
+function builderTitle(shop) {
+  const noun = shop?.builder?.noun || 'cake'
+  return `Build your own ${noun}`
+}
+
+function leadLabel(hours) {
+  if (!hours) return 'Order ahead'
+  if (hours >= 48 && hours % 24 === 0) {
+    const days = hours / 24
+    return days >= 14 && days % 7 === 0 ? `Order ${days / 7} weeks ahead` : `Order ${days} days ahead`
+  }
+  return `Order ${hours}h ahead`
+}
+
+function newBuild(shop) {
+  const flavours = flavoursFor(shop)
+  const layers = Math.min(DEFAULT_LAYERS, layerLimitFor(shop) || DEFAULT_LAYERS)
   return {
-    step: 1,
-    shape: 'round',
+    shape: shapesFor(shop)[0]?.id || 'round',
     size: '6',
-    flavor: 'chocolate',
+    flavor: (flavours.find((item) => item.id === 'chocolate') || flavours[0]).id,
     chocolate: 'Dark',
-    layerCount: DEFAULT_LAYERS,
-    fillings: Array(DEFAULT_LAYERS).fill(FILLINGS[0]),
+    layerCount: layers,
+    fillings: Array(layers).fill(FILLINGS[0]),
     sameFilling: true,
     frosting: 'buttercream',
     toppings: [],
@@ -95,27 +117,79 @@ function newBuild() {
   }
 }
 
-function buildPrice(build) {
+function buildPrice(build, shop) {
   const shape = SHAPES.find((item) => item.id === build.shape)
   const size = SIZES.find((item) => item.id === build.size)
-  const flavor = FLAVORS.find((item) => item.id === build.flavor)
+  const flavor = flavoursFor(shop).find((item) => item.id === build.flavor)
   const frosting = FROSTINGS.find((item) => item.id === build.frosting)
   const toppings = TOPPINGS.filter((item) => build.toppings.includes(item.id)).reduce((sum, item) => sum + item.price, 0)
   return (shape?.price || 0) + (size?.price || 0) + (flavor?.price || 0) + build.layerCount * PRICE_PER_LAYER + (frosting?.price || 0) + toppings
 }
 
-function flavorName(build) {
-  const flavor = FLAVORS.find((item) => item.id === build.flavor)
+function flavorName(build, shop) {
+  const flavor = flavoursFor(shop).find((item) => item.id === build.flavor)
   if (build.flavor === 'chocolate') return `${build.chocolate.toLowerCase()} chocolate`
   return flavor?.label.toLowerCase() || ''
 }
 
-function buildSummary(build) {
+function buildSummary(build, shop) {
   const shape = SHAPES.find((item) => item.id === build.shape)?.label || ''
   const size = SIZES.find((item) => item.id === build.size)?.label || ''
   const frosting = FROSTINGS.find((item) => item.id === build.frosting)?.label.toLowerCase()
   const toppings = TOPPINGS.filter((item) => build.toppings.includes(item.id)).map((item) => item.label.toLowerCase())
-  return [`${shape} ${size}`, `${build.layerCount} layers of ${flavorName(build)}`, frosting, ...toppings].filter(Boolean).join(' · ')
+  return [`${shape} ${size}`, `${build.layerCount} layers of ${flavorName(build, shop)}`, frosting, ...toppings].filter(Boolean).join(' · ')
+}
+
+/* ----- general "build your own" (cupcakes, donuts, macarons, wedding tiers…) ----- */
+
+function newCustom(shop) {
+  const picks = {}
+  ;(shop?.builder?.groups || []).forEach((group) => {
+    if (group.type === 'single') picks[group.id] = group.required || group.options[0]?.price === 0 ? group.options[0].id : ''
+    else if (group.type === 'multi') picks[group.id] = group.required ? [group.options[0].id] : []
+    else if (group.type === 'count') picks[group.id] = group.default ?? group.min
+    else picks[group.id] = ''
+  })
+  return picks
+}
+
+function customPrice(picks, shop) {
+  const builder = shop?.builder || {}
+  return (builder.groups || []).reduce((sum, group) => {
+    const value = picks[group.id]
+    if (group.type === 'single') return sum + (group.options.find((option) => option.id === value)?.price || 0)
+    if (group.type === 'multi') return sum + group.options.filter((option) => (value || []).includes(option.id)).reduce((total, option) => total + option.price, 0)
+    if (group.type === 'count') return sum + (Number(value) || 0) * (group.unitPrice || 0)
+    return sum
+  }, builder.base || 0)
+}
+
+function customFromPrice(shop) {
+  const builder = shop?.builder || {}
+  if (isCakeBuilder(shop)) return shapesFor(shop)[0].price + Math.min(DEFAULT_LAYERS, builder.maxLayers) * PRICE_PER_LAYER
+  return (builder.groups || []).reduce((sum, group) => {
+    if (group.type === 'single' && group.required) return sum + Math.min(...group.options.map((option) => option.price))
+    if (group.type === 'count') return sum + (group.min || 0) * (group.unitPrice || 0)
+    return sum
+  }, builder.base || 0)
+}
+
+function customSummary(picks, shop) {
+  return (shop?.builder?.groups || []).flatMap((group) => {
+    const value = picks[group.id]
+    if (group.type === 'single') {
+      const option = group.options.find((item) => item.id === value)
+      return option && !/^no |^none$|^plain$/i.test(option.label) ? [option.label] : []
+    }
+    if (group.type === 'multi') return group.options.filter((option) => (value || []).includes(option.id)).map((option) => option.label)
+    if (group.type === 'count') return value ? [`${value} ${group.unitLabel}${Number(value) === 1 ? '' : 's'}`] : []
+    return []
+  }).join(' · ')
+}
+
+function customMissing(picks, shop) {
+  const group = (shop?.builder?.groups || []).find((item) => item.required && (item.type === 'multi' ? !(picks[item.id] || []).length : !picks[item.id]))
+  return group ? `Choose ${group.title.toLowerCase()}` : ''
 }
 
 /* ---------- small building blocks ---------- */
@@ -137,6 +211,14 @@ function Icon({ name, size = 22 }) {
     bell: <><path d="M18 8a6 6 0 0 0-12 0c0 7-3 8-3 8h18s-3-1-3-8" /><path d="M10 20a2 2 0 0 0 4 0" /></>,
     gear: <><circle cx="12" cy="12" r="3" /><path d="M12 2v3M12 19v3M4.2 4.2l2.1 2.1M17.7 17.7l2.1 2.1M2 12h3M19 12h3M4.2 19.8l2.1-2.1M17.7 6.3l2.1-2.1" /></>,
     help: <><circle cx="12" cy="12" r="9" /><path d="M9.5 9.5a2.5 2.5 0 1 1 3.5 2.3c-.6.3-1 .8-1 1.5V14" /><path d="M12 17.5h.01" /></>,
+    cupcake: <><path d="M6 12h12l-1.6 8.5a1 1 0 0 1-1 .8H8.6a1 1 0 0 1-1-.8z" /><path d="M5 12a3 3 0 0 1 2-5 4 4 0 0 1 7.5-1.5A3.5 3.5 0 0 1 19 12" /><path d="M10 15v3M14 15v3" /></>,
+    donut: <><circle cx="12" cy="12" r="8.5" /><circle cx="12" cy="12" r="3" /><path d="M8 7.5l.5.8M15.5 7l-.4.9M17.5 12.5l-.9.2M7 15.5l.8-.4" /></>,
+    cookie: <><circle cx="12" cy="12" r="8.5" /><circle cx="9" cy="9.5" r="1" /><circle cx="14.5" cy="8.5" r="1" /><circle cx="15" cy="14" r="1" /><circle cx="9.5" cy="15" r="1" /></>,
+    macaron: <><path d="M4 10.5a8 4 0 0 1 16 0z" /><path d="M4 13.5a8 4 0 0 0 16 0z" /><path d="M3.5 12h17" /></>,
+    icecream: <><path d="M5 11h14v9H5z" /><path d="M5 15h14" /><path d="M7 11a5 5 0 0 1 10 0" /></>,
+    slice: <><path d="M3 18 19 8v10z" /><path d="M3 18 13 6.5a5 5 0 0 1 6 1.5" /><path d="M8 18v-2M13 18v-3" /></>,
+    tiers: <><path d="M8 4h8v5H8z" /><path d="M5 9h14v5H5z" /><path d="M3 14h18v6H3z" /></>,
+    filter: <path d="M4 6h16M7 12h10M10 18h4" />,
     heart: <path d="M12 20s-7-4.5-7-10a4 4 0 0 1 7-2.6A4 4 0 0 1 19 10c0 5.5-7 10-7 10z" />,
     check: <path d="m5 12 5 5 9-10" />,
     plus: <path d="M12 5v14M5 12h14" />,
@@ -172,10 +254,10 @@ function Section({ title, note, children }) {
   )
 }
 
-function Photo({ tint = '#F3E8E2', className = '' }) {
+function Photo({ tint = '#F3E8E2', icon = 'cake', size = 30, className = '' }) {
   return (
     <div className={`ca-photo ${className}`} style={{ background: tint }} aria-hidden="true">
-      <Icon name="cake" size={30} />
+      <Icon name={icon} size={size} />
     </div>
   )
 }
@@ -247,14 +329,17 @@ function StickyBar({ children }) {
 
 export default function CustomerApp({ ctx }) {
   const {
-    view: rawView, setView, bakeries, presets, cart, setCart, uiState, setUiState,
+    view: rawView, setView, cart, setCart, uiState, setUiState,
     customerShopId, setCustomerShopId, pickupSlots,
   } = ctx
   const view = LEGACY_VIEWS[rawView] || rawView
 
   const [itemId, setItemId] = useState('')
   const [itemNote, setItemNote] = useState('')
-  const [build, setBuild] = useState(newBuild)
+  const bakeries = SHOPS
+  const [build, setBuild] = useState(() => newBuild(SHOPS.find((item) => item.id === customerShopId) || SHOPS[0]))
+  const [custom, setCustom] = useState(() => newCustom(SHOPS.find((item) => item.id === customerShopId) || SHOPS[0]))
+  const [category, setCategory] = useState('all')
   const [query, setQuery] = useState('')
   const [pendingItem, setPendingItem] = useState(null)
   const [accountPage, setAccountPage] = useState('main')
@@ -275,6 +360,13 @@ export default function CustomerApp({ ctx }) {
     return map
   }, [pickupSlots])
 
+  const shopSlots = ctx.sortedPickupSlots
+  useEffect(() => {
+    if (view !== 'checkout' || ctx.fulfillmentType !== 'pickup') return
+    const open = shopSlots.filter((slot) => ctx.getPickupSlotState(slot).selectable)
+    if (open.length && !open.some((slot) => slot.id === ctx.pickupSlotId)) ctx.setPickupSlotId(open[0].id)
+  }, [view, ctx, shopSlots])
+
   function go(next) {
     setUiState((current) => ({ ...current, error: '', message: '' }))
     if (next === 'account') setAccountPage('main')
@@ -288,10 +380,10 @@ export default function CustomerApp({ ctx }) {
   }
 
   function startBuild(id) {
-    const fallback = bakeries.find((item) => layerLimitFor(item) > 0)
-    if (id) setCustomerShopId(id)
-    else if (layerLimitFor(bakery) === 0 && fallback) setCustomerShopId(fallback.id)
-    setBuild(newBuild())
+    const shop = bakeries.find((item) => item.id === id) || bakery
+    setCustomerShopId(shop.id)
+    setBuild(newBuild(shop))
+    setCustom(newCustom(shop))
     go('build')
   }
 
@@ -333,20 +425,18 @@ export default function CustomerApp({ ctx }) {
     )
   }
 
-  function renderBakeryCard(item, index) {
-    const tints = ['#F3E8E2', '#EDE5F0', '#E5EEE8']
+  function renderBakeryCard(item) {
     const slot = nextSlotFor[item.id]
-    const canBuild = layerLimitFor(item) > 0
     return (
       <button key={item.id} type="button" className="ca-store-card" onClick={() => openBakery(item.id)}>
-        <Photo tint={tints[index % tints.length]} className="ca-store-photo" />
+        <Photo tint={item.tint} icon={item.icon} size={44} className="ca-store-photo" />
         <span className="ca-store-row">
           <span className="ca-store-text">
             <span className="ca-store-name">{item.name}</span>
-            <span className="ca-muted">{item.hero || item.menuSummary}</span>
+            <span className="ca-muted">{item.area} · {item.tagline}</span>
             <span className="ca-chips">
-              {canBuild ? <span className="ca-chip is-accent">Build your own</span> : <span className="ca-chip">Ready-made</span>}
-              {slot ? <span className="ca-chip">Next: {ctx.formatPickupWindow(slot)}</span> : null}
+              <span className="ca-chip is-accent">{builderTitle(item)}</span>
+              <span className="ca-chip">{slot ? `Next: ${ctx.formatPickupWindow(slot)}` : leadLabel(item.leadHours)}</span>
             </span>
           </span>
         </span>
@@ -355,13 +445,14 @@ export default function CustomerApp({ ctx }) {
   }
 
   function renderHome() {
+    const shown = category === 'all' ? bakeries : bakeries.filter((item) => item.category === category)
     return (
       <div className="ca-screen has-nav">
         <div className="ca-pad ca-stack-14">
           <div className="ca-home-head">
             <div>
               <span className="ca-muted ca-small">Order ahead from</span>
-              <span className="ca-home-place">Local bakeries near you</span>
+              <span className="ca-home-place">Bakeries in Metro Vancouver</span>
             </div>
             <button type="button" className="ca-round-btn" aria-label={`Cart, ${cartCount} items`} onClick={() => go('checkout')}>
               <Icon name="cart" size={20} />
@@ -370,12 +461,17 @@ export default function CustomerApp({ ctx }) {
           </div>
           <Segmented label="Delivery or pickup" value={ctx.fulfillmentType} onChange={ctx.setFulfillmentType} options={[{ id: 'delivery', label: 'Delivery' }, { id: 'pickup', label: 'Pickup' }]} />
           <button type="button" className="ca-search-fake" onClick={() => go('search')}>
-            <Icon name="search" size={18} /><span>Search cakes and bakeries</span>
+            <Icon name="search" size={18} /><span>Search cakes, cupcakes, bakeries</span>
           </button>
         </div>
+        <div className="ca-cats" role="tablist" aria-label="Shop type">
+          {CATEGORIES.map((item) => (
+            <button key={item.id} type="button" role="tab" aria-selected={category === item.id} className={`ca-cat ${category === item.id ? 'is-active' : ''}`} onClick={() => setCategory(item.id)}>{item.label}</button>
+          ))}
+        </div>
         <div className="ca-pad ca-section">
-          <h2 className="ca-h2">Bakeries near you</h2>
-          <div className="ca-stack-18">{bakeries.map(renderBakeryCard)}</div>
+          <h2 className="ca-h2">{category === 'all' ? `${bakeries.length} bakeries near you` : `${CATEGORIES.find((item) => item.id === category)?.label} · ${shown.length}`}</h2>
+          <div className="ca-stack-18">{shown.map(renderBakeryCard)}</div>
         </div>
       </div>
     )
@@ -383,9 +479,9 @@ export default function CustomerApp({ ctx }) {
 
   function renderSearch() {
     const term = query.trim().toLowerCase()
-    const bakeryHits = term ? bakeries.filter((item) => `${item.name} ${item.hero} ${item.city}`.toLowerCase().includes(term)) : []
+    const bakeryHits = term ? bakeries.filter((item) => `${item.name} ${item.area} ${item.tagline} ${item.category} ${item.builder.noun}`.toLowerCase().includes(term)) : []
     const itemHits = term
-      ? bakeries.flatMap((item) => (presets[item.id] || []).filter((preset) => `${preset.title} ${preset.detail}`.toLowerCase().includes(term)).map((preset) => ({ ...preset, shop: item })))
+      ? bakeries.flatMap((item) => item.menu.filter((preset) => `${preset.title} ${preset.detail}`.toLowerCase().includes(term)).map((preset) => ({ ...preset, shop: item })))
       : []
     return (
       <div className="ca-screen has-nav">
@@ -394,7 +490,7 @@ export default function CustomerApp({ ctx }) {
           <label className="ca-search">
             <Icon name="search" size={18} />
             <span className="ca-sr">Search</span>
-            <input type="search" value={query} autoFocus placeholder="Chocolate, birthday, Richmond…" onChange={(event) => setQuery(event.target.value)} />
+            <input type="search" value={query} autoFocus placeholder="Cupcakes, matcha, wedding, Kitsilano…" onChange={(event) => setQuery(event.target.value)} />
           </label>
         </div>
         <div className="ca-pad ca-section ca-stack-10">
@@ -403,7 +499,7 @@ export default function CustomerApp({ ctx }) {
           {bakeryHits.map((item) => (
             <button key={item.id} type="button" className="ca-list-row" onClick={() => openBakery(item.id)}>
               <span className="ca-list-icon"><Icon name="store" /></span>
-              <span className="ca-list-text"><strong>{item.name}</strong><span className="ca-muted">{item.hero}</span></span>
+              <span className="ca-list-text"><strong>{item.name}</strong><span className="ca-muted">{item.area} · {item.tagline}</span></span>
               <Icon name="chevron" size={18} />
             </button>
           ))}
@@ -420,48 +516,46 @@ export default function CustomerApp({ ctx }) {
   }
 
   function renderBakery() {
-    const items = presets[bakery.id] || []
-    const limit = layerLimitFor(bakery)
+    const items = bakery.menu
     const slot = nextSlotFor[bakery.id]
+    const limit = layerLimitFor(bakery)
     return (
       <div className="ca-screen">
         <div className="ca-banner">
-          <Photo tint="#F3E8E2" className="ca-banner-photo" />
+          <Photo tint={bakery.tint} icon={bakery.icon} size={48} className="ca-banner-photo" />
           <button type="button" className="ca-float-btn ca-float-left" aria-label="Back" onClick={() => go('home')}><Icon name="back" size={20} /></button>
         </div>
         <div className="ca-pad ca-stack-12 ca-pt-16">
           <div className="ca-stack-4">
             <h1 className="ca-h1">{bakery.name}</h1>
-            <span className="ca-muted">{bakery.hero}</span>
+            <span className="ca-muted">{bakery.tagline}</span>
           </div>
           <div className="ca-facts">
-            <div><strong>{bakery.city || 'Local'}</strong><span>Location</span></div>
-            <div><strong>{slot ? ctx.formatPickupWindow(slot) : 'Order ahead'}</strong><span>Next pickup</span></div>
-            <div><strong>{limit ? `Up to ${limit}` : 'Ready-made'}</strong><span>{limit ? 'Layers' : 'Menu'}</span></div>
+            <div><strong>{bakery.area}</strong><span>Location</span></div>
+            <div><strong>{leadLabel(bakery.leadHours).replace('Order ', '')}</strong><span>Order ahead</span></div>
+            <div><strong>{slot ? ctx.formatPickupWindow(slot).split(' · ')[0] : 'Soon'}</strong><span>Next pickup</span></div>
           </div>
         </div>
         <div className="ca-pad ca-section">
           <h2 className="ca-h2">Menu</h2>
-          {limit ? (
-            <button type="button" className="ca-menu-row" onClick={() => startBuild(bakery.id)}>
-              <span className="ca-menu-text">
-                <span className="ca-menu-title">Build your own cake</span>
-                <span className="ca-muted">Choose the shape, sponge, up to {limit} layers, fillings and toppings</span>
-                <span className="ca-menu-price">From {money(SHAPES[0].price + PRICE_PER_LAYER * DEFAULT_LAYERS)}</span>
-              </span>
-              <span className="ca-menu-thumb is-accent"><Icon name="cake" size={30} /><span className="ca-plus" aria-hidden="true"><Icon name="plus" size={16} /></span></span>
-            </button>
-          ) : null}
-          {items.length ? items.map((item) => (
+          <button type="button" className="ca-menu-row" onClick={() => startBuild(bakery.id)}>
+            <span className="ca-menu-text">
+              <span className="ca-menu-title">{builderTitle(bakery)}</span>
+              <span className="ca-muted">{limit ? `Choose the shape, sponge, up to ${limit} layers, fillings and toppings` : `Choose ${(bakery.builder.groups || []).slice(0, 4).map((group) => group.title.toLowerCase()).join(', ')} and more`}</span>
+              <span className="ca-menu-price">From {money(customFromPrice(bakery))}</span>
+            </span>
+            <span className="ca-menu-thumb is-accent"><Icon name={bakery.icon} size={32} /><span className="ca-plus" aria-hidden="true"><Icon name="plus" size={16} /></span></span>
+          </button>
+          {items.map((item) => (
             <button key={item.id} type="button" className="ca-menu-row" onClick={() => { setItemId(item.id); setItemNote(''); go('item') }}>
               <span className="ca-menu-text">
                 <span className="ca-menu-title">{item.title}</span>
                 <span className="ca-muted">{item.detail}</span>
                 <span className="ca-menu-price">{money(item.price)}</span>
               </span>
-              <span className="ca-menu-thumb"><Icon name="cake" size={30} /><span className="ca-plus" aria-hidden="true"><Icon name="plus" size={16} /></span></span>
+              <span className="ca-menu-thumb" style={{ background: bakery.tint }}><Icon name={bakery.icon} size={30} /><span className="ca-plus" aria-hidden="true"><Icon name="plus" size={16} /></span></span>
             </button>
-          )) : <p className="ca-muted">This bakery hasn’t added ready-made cakes yet.</p>}
+          ))}
         </div>
         {cartCount ? (
           <StickyBar>
@@ -475,7 +569,7 @@ export default function CustomerApp({ ctx }) {
   }
 
   function renderItem() {
-    const item = (presets[bakery.id] || []).find((entry) => entry.id === itemId)
+    const item = bakery.menu.find((entry) => entry.id === itemId)
     if (!item) return renderBakery()
     const addPreset = () => addItemToCart({
       id: Date.now(),
@@ -489,6 +583,7 @@ export default function CustomerApp({ ctx }) {
       savedDesignId: null,
       config: {
         occasion: 'Ready-made',
+        summary: [item.title, itemNote ? `“${itemNote}”` : ''].filter(Boolean).join(' · '),
         mode: 'preset',
         cakeType: 'round',
         layerCount: 1,
@@ -500,7 +595,7 @@ export default function CustomerApp({ ctx }) {
     return (
       <div className="ca-screen">
         <div className="ca-banner is-tall">
-          <Photo tint="#F3E8E2" className="ca-banner-photo" />
+          <Photo tint={bakery.tint} icon={bakery.icon} size={56} className="ca-banner-photo" />
           <button type="button" className="ca-float-btn ca-float-left" aria-label="Close" onClick={() => go('bakery')}><Icon name="close" size={18} /></button>
         </div>
         <div className="ca-pad ca-stack-8 ca-pt-16">
@@ -520,9 +615,10 @@ export default function CustomerApp({ ctx }) {
   }
 
   function renderBuild() {
+    if (!isCakeBuilder(bakery)) return renderCustomBuild()
     const limit = layerLimitFor(bakery)
-    if (!limit) return renderBakery()
-    const price = buildPrice(build)
+    const flavours = flavoursFor(bakery)
+    const price = buildPrice(build, bakery)
     const shapes = shapesFor(bakery)
     const set = (patch) => setBuild((current) => ({ ...current, ...patch }))
     const atMax = build.layerCount >= limit
@@ -536,12 +632,13 @@ export default function CustomerApp({ ctx }) {
       }))
     }
     const addToCart = () => {
-      const flavor = FLAVORS.find((item) => item.id === build.flavor)
-      const sponge = build.flavor === 'chocolate' ? `${build.chocolate} chocolate sponge` : flavor.sponge
+      const flavor = flavours.find((item) => item.id === build.flavor) || flavours[0]
+      const sponge = build.flavor === 'chocolate' ? `${build.chocolate} chocolate sponge` : `${flavor.label} sponge`
+      const summary = buildSummary(build, bakery) + (build.message ? ` · “${build.message}”` : '')
       addItemToCart({
         id: Date.now(),
-        title: `Custom ${flavorName(build)} cake`,
-        summary: buildSummary(build) + (build.message ? ` · “${build.message}”` : ''),
+        title: `Custom ${flavorName(build, bakery)} ${bakery.builder.noun}`,
+        summary,
         layerCount: build.layerCount,
         unitPrice: price,
         quantity: 1,
@@ -550,7 +647,8 @@ export default function CustomerApp({ ctx }) {
         savedDesignId: null,
         config: {
           occasion: 'Custom',
-          mode: bakery.capability?.fullCustom ? 'advanced' : 'simple',
+          summary,
+          mode: limit > 4 ? 'advanced' : 'simple',
           cakeType: build.shape,
           layerCount: build.layerCount,
           size: build.size,
@@ -565,7 +663,7 @@ export default function CustomerApp({ ctx }) {
     return (
       <div className="ca-screen">
         <div className="ca-banner">
-          <div className="ca-stack-view is-banner" role="img" aria-label={`${build.layerCount} layer ${flavorName(build)} cake`}>
+          <div className="ca-stack-view is-banner" role="img" aria-label={`${build.layerCount} layer ${flavorName(build, bakery)} cake`}>
             <div className="ca-stack">
               <div className="ca-stack-top" />
               {Array.from({ length: build.layerCount }, (_, index) => (
@@ -577,8 +675,8 @@ export default function CustomerApp({ ctx }) {
           <button type="button" className="ca-float-btn ca-float-left" aria-label="Close" onClick={() => go('bakery')}><Icon name="close" size={18} /></button>
         </div>
         <div className="ca-pad ca-stack-8 ca-pt-16">
-          <h1 className="ca-h1">Build your own cake</h1>
-          <span className="ca-price-lg">From {money(SHAPES[0].price + PRICE_PER_LAYER * DEFAULT_LAYERS)}</span>
+          <h1 className="ca-h1">{builderTitle(bakery)}</h1>
+          <span className="ca-price-lg">From {money(customFromPrice(bakery))}</span>
           <p className="ca-muted ca-lh">Choose everything: shape, sponge, layers, fillings and toppings. {bakery.name} bakes it fresh for your pickup time.</p>
         </div>
 
@@ -606,7 +704,7 @@ export default function CustomerApp({ ctx }) {
 
           <Section title="Cake flavour" note="Required">
             <div className="ca-stack-10">
-              {FLAVORS.map((flavor) => {
+              {flavours.map((flavor) => {
                 const selected = build.flavor === flavor.id
                 return (
                   <div key={flavor.id} className={`ca-flavor ${selected ? 'is-selected' : ''}`}>
@@ -698,11 +796,123 @@ export default function CustomerApp({ ctx }) {
 
           <div className="ca-summary ca-mt-16">
             <strong>Your cake</strong>
-            <span>{buildSummary(build)}</span>
+            <span>{buildSummary(build, bakery)}</span>
           </div>
         </div>
         <StickyBar>
           <button type="button" className="ca-btn" onClick={addToCart}>Add to cart · {money(price)}</button>
+        </StickyBar>
+      </div>
+    )
+  }
+
+  function renderCustomBuild() {
+    const builder = bakery.builder
+    const price = customPrice(custom, bakery)
+    const missing = customMissing(custom, bakery)
+    const setPick = (id, value) => setCustom((current) => ({ ...current, [id]: value }))
+    const summary = customSummary(custom, bakery)
+    const textGroup = builder.groups.find((group) => group.type === 'text')
+    const note = textGroup ? String(custom[textGroup.id] || '').trim() : ''
+    const addToCart = () => addItemToCart({
+      id: Date.now(),
+      title: `Custom ${builder.noun}`,
+      summary: summary + (note ? ` · “${note}”` : ''),
+      layerCount: 1,
+      unitPrice: price,
+      quantity: 1,
+      totalPrice: price,
+      shopId: bakery.id,
+      savedDesignId: null,
+      config: {
+        occasion: 'Custom',
+        kind: builder.noun,
+        summary: summary + (note ? ` · “${note}”` : ''),
+        mode: 'custom',
+        cakeType: bakery.category,
+        layerCount: 1,
+        selections: custom,
+        message: note,
+        layers: [{ id: 0, name: `Custom ${builder.noun}`, bread: summary, sugar: '', cream: '', flavor: summary }],
+      },
+    })
+
+    return (
+      <div className="ca-screen">
+        <div className="ca-banner">
+          <Photo tint={bakery.tint} icon={bakery.icon} size={64} className="ca-banner-photo" />
+          <button type="button" className="ca-float-btn ca-float-left" aria-label="Close" onClick={() => go('bakery')}><Icon name="close" size={18} /></button>
+        </div>
+        <div className="ca-pad ca-stack-8 ca-pt-16">
+          <h1 className="ca-h1">{builderTitle(bakery)}</h1>
+          <span className="ca-price-lg">From {money(customFromPrice(bakery))}</span>
+          <p className="ca-muted ca-lh">Pick every detail. {bakery.name} makes it fresh for you. {leadLabel(bakery.leadHours)}.</p>
+        </div>
+        <div className="ca-pad ca-pb-24">
+          {builder.groups.map((group) => {
+            const value = custom[group.id]
+            if (group.type === 'text') {
+              return (
+                <Section key={group.id} title={group.title} note="Optional">
+                  <input aria-label={group.title} className="ca-input" maxLength={60} placeholder={group.placeholder} value={value || ''} onChange={(event) => setPick(group.id, event.target.value)} />
+                </Section>
+              )
+            }
+            if (group.type === 'count') {
+              const step = group.step || 1
+              return (
+                <Section key={group.id} title={group.title} note={group.note}>
+                  <div className="ca-layer-controls is-boxed">
+                    <div className="ca-stack-2">
+                      <strong>{value} {group.unitLabel}{Number(value) === 1 ? '' : 's'}</strong>
+                      <span className={value >= group.max ? 'ca-warn ca-small' : 'ca-muted ca-small'}>{value >= group.max ? `${group.max} is the most this shop makes` : `+${money(group.unitPrice * step)} per ${step > 1 ? `${step} ${group.unitLabel}s` : group.unitLabel}`}</span>
+                    </div>
+                    <div className="ca-stepper">
+                      <button type="button" aria-label={`Fewer ${group.unitLabel}s`} disabled={value <= group.min} onClick={() => setPick(group.id, Math.max(group.min, value - step))}>−</button>
+                      <button type="button" aria-label={`More ${group.unitLabel}s`} className="is-dark" disabled={value >= group.max} onClick={() => setPick(group.id, Math.min(group.max, value + step))}>+</button>
+                    </div>
+                  </div>
+                </Section>
+              )
+            }
+            if (group.type === 'multi') {
+              const chosen = value || []
+              const full = group.max && chosen.length >= group.max
+              return (
+                <Section key={group.id} title={group.title} note={group.note || (group.required ? 'Required' : group.max ? `Optional · up to ${group.max}` : 'Optional')}>
+                  <div className="ca-wrap">
+                    {group.options.map((option) => {
+                      const on = chosen.includes(option.id)
+                      return (
+                        <button key={option.id} type="button" aria-pressed={on} disabled={!on && full} className={`ca-pill ${on ? 'is-dark' : ''}`} onClick={() => setPick(group.id, on ? chosen.filter((id) => id !== option.id) : [...chosen, option.id])}>
+                          {option.label}{option.price ? ` · +${money(option.price)}` : ''}
+                        </button>
+                      )
+                    })}
+                  </div>
+                </Section>
+              )
+            }
+            return (
+              <Section key={group.id} title={group.title} note={group.required ? 'Required' : 'Optional'}>
+                <div className={group.options.length <= 3 ? 'ca-grid-3' : 'ca-grid-2'}>
+                  {group.options.map((option) => (
+                    <button key={option.id} type="button" aria-pressed={value === option.id} className={`ca-size ${value === option.id ? 'is-selected' : ''}`} onClick={() => setPick(group.id, option.id)}>
+                      <strong className="ca-small-strong">{option.label}</strong>
+                      <span>{group.id === 'box' || group.id === 'size' || group.id === 'length' ? money(option.price) : option.price ? `+${money(option.price)}` : 'Included'}</span>
+                    </button>
+                  ))}
+                </div>
+              </Section>
+            )
+          })}
+          <div className="ca-summary ca-mt-16">
+            <strong>Your {builder.noun}</strong>
+            <span>{summary || 'Make your picks above'}</span>
+          </div>
+        </div>
+        <StickyBar>
+          <button type="button" className="ca-btn" disabled={Boolean(missing)} onClick={addToCart}>{missing || `Add to cart · ${money(price)}`}</button>
         </StickyBar>
       </div>
     )
@@ -855,7 +1065,7 @@ export default function CustomerApp({ ctx }) {
           ) : null}
           <div className="ca-summary">
             <strong>{money(order.total)}</strong>
-            <span>{order.designSnapshot ? ctx.toDesignSummary(order.designSnapshot) : 'Cake order'}</span>
+            <span>{order.designSnapshot?.summary || (order.designSnapshot ? ctx.toDesignSummary(order.designSnapshot) : 'Cake order')}</span>
           </div>
           <button type="button" className="ca-btn ca-btn-ghost" onClick={() => { setAccountPage('help'); go('account'); setAccountPage('help') }}><Icon name="help" size={18} />Get help with this order</button>
         </div>
