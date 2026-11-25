@@ -1,5 +1,6 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useState } from 'react'
 import { CATEGORIES, SHOPS } from './catalog.js'
+import { friendlyError, supabase } from './supabaseClient.js'
 import './customer.css'
 
 // Customer-facing app (redesign). All data and actions come from App via `ctx`,
@@ -41,13 +42,73 @@ const TOPPINGS = [
 const PRICE_PER_LAYER = 8
 const DEFAULT_LAYERS = 3
 
-const ORDER_STEPS = [
-  { id: 'placed', label: 'Order placed', statuses: ['new'] },
-  { id: 'confirmed', label: 'Confirmed by the bakery', statuses: ['confirmed'] },
-  { id: 'baking', label: 'Baking and decorating', statuses: ['baking', 'decorating'] },
-  { id: 'ready', label: 'Ready', statuses: ['ready'] },
-  { id: 'done', label: 'Picked up', statuses: ['picked_up', 'delivered', 'completed'] },
+const PICKUP_STEPS = [
+  { id: 'new', label: 'Order placed' },
+  { id: 'confirmed', label: 'Confirmed by the bakery' },
+  { id: 'baking', label: 'Baking and decorating' },
+  { id: 'ready', label: 'Ready for pickup' },
+  { id: 'picked_up', label: 'Picked up' },
 ]
+const DELIVERY_STEPS = [
+  { id: 'new', label: 'Order placed' },
+  { id: 'confirmed', label: 'Confirmed by the bakery' },
+  { id: 'baking', label: 'Baking and decorating' },
+  { id: 'ready', label: 'Ready at the bakery' },
+  { id: 'out_for_delivery', label: 'On the way' },
+  { id: 'delivered', label: 'Delivered' },
+]
+const STATUS_TEXT = { new: 'Waiting for the bakery', confirmed: 'Confirmed', baking: 'Baking', ready: 'Ready', out_for_delivery: 'On the way', picked_up: 'Picked up', delivered: 'Delivered', cancelled: 'Cancelled' }
+
+const DETAILS_KEY = 'cake-customer-details'
+const SLOT_HOURS = [10, 13, 16]
+const DELIVERY_FEE = 7.99
+const SERVICE_FEE = 2.49
+const DRIVER_PAY = 8
+const TIP_OPTIONS = [0, 2, 4, 6]
+
+function readDetails() {
+  try {
+    return { addresses: [], cards: [], phone: '', ...JSON.parse(window.localStorage.getItem(DETAILS_KEY) || '{}') }
+  } catch {
+    return { addresses: [], cards: [], phone: '' }
+  }
+}
+
+function timeText(date) {
+  return date.toLocaleTimeString('en-CA', { hour: 'numeric', minute: '2-digit' }).replace(':00', '').replace(/\./g, '')
+}
+
+// Pickup/ready windows: 10 AM, 1 PM and 4 PM, starting after the shop's notice period.
+function slotsFor(shop, count = 6) {
+  const earliest = Date.now() + (shop?.leadHours || 24) * 3600 * 1000
+  const day = new Date()
+  day.setHours(0, 0, 0, 0)
+  const out = []
+  for (let offset = 0; offset < 60 && out.length < count; offset += 1) {
+    for (const hour of SLOT_HOURS) {
+      const start = new Date(day)
+      start.setDate(day.getDate() + offset)
+      start.setHours(hour, 0, 0, 0)
+      if (start.getTime() >= earliest && out.length < count) out.push({ id: start.toISOString(), start, end: new Date(start.getTime() + 3600 * 1000) })
+    }
+  }
+  return out
+}
+
+function slotLabel(slot) {
+  if (!slot) return ''
+  const start = new Date(slot.start)
+  return `${start.toLocaleDateString('en-CA', { weekday: 'short', month: 'short', day: 'numeric' })} · ${timeText(start)}–${timeText(new Date(slot.end))}`
+}
+
+function liveShopFromRow(row) {
+  return {
+    id: row.id, name: row.name, area: row.area, address: row.address, category: row.category,
+    tagline: row.tagline || 'New on the app', leadHours: row.lead_hours || 24, tint: row.tint || '#F3E8E2', icon: row.icon || 'cake',
+    builder: row.builder && Object.keys(row.builder).length ? row.builder : SHOPS[0].builder,
+    menu: (row.menu || []).map((item) => ({ ...item, price: Number(item.price) || 0 })), live: true,
+  }
+}
 
 const LEGACY_VIEWS = { builder: 'build', saved: 'orders', accounts: 'account' }
 
@@ -330,13 +391,19 @@ function StickyBar({ children }) {
 export default function CustomerApp({ ctx }) {
   const {
     view: rawView, setView, cart, setCart, uiState, setUiState,
-    customerShopId, setCustomerShopId, pickupSlots,
+    customerShopId, setCustomerShopId,
   } = ctx
   const view = LEGACY_VIEWS[rawView] || rawView
 
   const [itemId, setItemId] = useState('')
   const [itemNote, setItemNote] = useState('')
-  const bakeries = SHOPS
+  const [liveShops, setLiveShops] = useState([])
+  const bakeries = useMemo(() => [...liveShops, ...SHOPS], [liveShops])
+  const [sbUser, setSbUser] = useState(null)
+  const [myOrders, setMyOrders] = useState([])
+  const [details, setDetails] = useState(readDetails)
+  const [checkout, setCheckout] = useState({ slotId: '', addressId: '', line1: '', city: 'Vancouver', instructions: '', phone: '', tip: 4, notes: '', cardId: '', cardName: '', cardLast4: '', placing: false, error: '' })
+  const [placedId, setPlacedId] = useState('')
   const [build, setBuild] = useState(() => newBuild(SHOPS.find((item) => item.id === customerShopId) || SHOPS[0]))
   const [custom, setCustom] = useState(() => newCustom(SHOPS.find((item) => item.id === customerShopId) || SHOPS[0]))
   const [category, setCategory] = useState('all')
@@ -348,24 +415,42 @@ export default function CustomerApp({ ctx }) {
 
   const bakery = bakeries.find((item) => item.id === customerShopId) || bakeries[0]
   const cartCount = cart.reduce((sum, item) => sum + (item.quantity || 1), 0)
+  const cartTotals = useMemo(() => {
+    const subtotal = cart.reduce((sum, item) => sum + (item.unitPrice != null ? item.unitPrice * (item.quantity || 1) : item.totalPrice || 0), 0)
+    const delivery = subtotal && ctx.fulfillmentType === 'delivery' ? DELIVERY_FEE : 0
+    const service = subtotal ? SERVICE_FEE : 0
+    const tax = Math.round((subtotal + delivery + service) * 0.05 * 100) / 100
+    const tip = ctx.fulfillmentType === 'delivery' ? Number(checkout.tip) || 0 : 0
+    return { subtotal, delivery, service, tax, tip, total: Math.round((subtotal + delivery + service + tax + tip) * 100) / 100 }
+  }, [cart, ctx.fulfillmentType, checkout.tip])
 
-  const nextSlotFor = useMemo(() => {
-    const now = Date.now()
-    const map = {}
-    pickupSlots.forEach((slot) => {
-      const start = new Date(slot.startTime || 0).getTime()
-      if (slot.active === false || start < now || slot.booked >= slot.capacity) return
-      if (!map[slot.shopId] || start < new Date(map[slot.shopId].startTime).getTime()) map[slot.shopId] = slot
-    })
-    return map
-  }, [pickupSlots])
+  const signedIn = Boolean(sbUser)
 
-  const shopSlots = ctx.sortedPickupSlots
   useEffect(() => {
-    if (view !== 'checkout' || ctx.fulfillmentType !== 'pickup') return
-    const open = shopSlots.filter((slot) => ctx.getPickupSlotState(slot).selectable)
-    if (open.length && !open.some((slot) => slot.id === ctx.pickupSlotId)) ctx.setPickupSlotId(open[0].id)
-  }, [view, ctx, shopSlots])
+    if (!supabase) return undefined
+    supabase.auth.getSession().then(({ data }) => setSbUser(data.session?.user || null))
+    const { data: listener } = supabase.auth.onAuthStateChange((event, session) => { if (event !== 'TOKEN_REFRESHED') setSbUser(session?.user || null) })
+    supabase.from('bakeries').select('*').eq('active', true).then(({ data }) => setLiveShops((data || []).map(liveShopFromRow)))
+    return () => listener.subscription.unsubscribe()
+  }, [])
+
+  const loadOrders = useCallback(async () => {
+    if (!supabase || !sbUser) { setMyOrders([]); return }
+    const { data } = await supabase.from('orders').select('*').eq('customer_id', sbUser.id).order('created_at', { ascending: false }).limit(50)
+    setMyOrders(data || [])
+  }, [sbUser])
+
+  useEffect(() => {
+    loadOrders()
+    if (!sbUser || !(view === 'orders' || placedId)) return undefined
+    const timer = setInterval(loadOrders, 15000)
+    return () => clearInterval(timer)
+  }, [loadOrders, sbUser, view, placedId])
+
+  function saveDetails(next) {
+    setDetails(next)
+    try { window.localStorage.setItem(DETAILS_KEY, JSON.stringify(next)) } catch { /* storage unavailable */ }
+  }
 
   function go(next) {
     setUiState((current) => ({ ...current, error: '', message: '' }))
@@ -426,7 +511,7 @@ export default function CustomerApp({ ctx }) {
   }
 
   function renderBakeryCard(item) {
-    const slot = nextSlotFor[item.id]
+    const slot = slotsFor(item, 1)[0]
     return (
       <button key={item.id} type="button" className="ca-store-card" onClick={() => openBakery(item.id)}>
         <Photo tint={item.tint} icon={item.icon} size={44} className="ca-store-photo" />
@@ -436,7 +521,8 @@ export default function CustomerApp({ ctx }) {
             <span className="ca-muted">{item.area} · {item.tagline}</span>
             <span className="ca-chips">
               <span className="ca-chip is-accent">{builderTitle(item)}</span>
-              <span className="ca-chip">{slot ? `Next: ${ctx.formatPickupWindow(slot)}` : leadLabel(item.leadHours)}</span>
+              {item.live ? <span className="ca-chip is-accent">New</span> : null}
+              <span className="ca-chip">{slot ? `Earliest: ${slotLabel(slot).split(' · ')[0]}` : leadLabel(item.leadHours)}</span>
             </span>
           </span>
         </span>
@@ -517,7 +603,7 @@ export default function CustomerApp({ ctx }) {
 
   function renderBakery() {
     const items = bakery.menu
-    const slot = nextSlotFor[bakery.id]
+    const slot = slotsFor(bakery, 1)[0]
     const limit = layerLimitFor(bakery)
     return (
       <div className="ca-screen">
@@ -533,7 +619,7 @@ export default function CustomerApp({ ctx }) {
           <div className="ca-facts">
             <div><strong>{bakery.area}</strong><span>Location</span></div>
             <div><strong>{leadLabel(bakery.leadHours).replace('Order ', '')}</strong><span>Order ahead</span></div>
-            <div><strong>{slot ? ctx.formatPickupWindow(slot).split(' · ')[0] : 'Soon'}</strong><span>Next pickup</span></div>
+            <div><strong>{slot ? slotLabel(slot).split(' · ')[0] : 'Soon'}</strong><span>Earliest</span></div>
           </div>
         </div>
         <div className="ca-pad ca-section">
@@ -560,7 +646,7 @@ export default function CustomerApp({ ctx }) {
         {cartCount ? (
           <StickyBar>
             <button type="button" className="ca-btn ca-btn-cart" onClick={() => go('checkout')}>
-              <span className="ca-cart-count">{cartCount}</span><span>View cart</span><span>{money(ctx.cartSubtotal)}</span>
+              <span className="ca-cart-count">{cartCount}</span><span>View cart</span><span>{money(cartTotals.subtotal)}</span>
             </button>
           </StickyBar>
         ) : null}
@@ -919,13 +1005,10 @@ export default function CustomerApp({ ctx }) {
   }
 
   function renderCheckout() {
-    if (ctx.checkoutStage === 'placed' && ctx.latestPlacedOrder) {
-      const placed = ctx.customerOrders.find((order) => order.id === ctx.latestPlacedOrder.id) || { ...ctx.latestPlacedOrder, status: 'new' }
-      return renderOrderDetail(placed, () => { ctx.setCheckoutStage('summary'); go('home') })
+    if (placedId) {
+      const placed = myOrders.find((order) => order.id === placedId)
+      if (placed) return renderOrderDetail(placed, () => { setPlacedId(''); go('home') }, true)
     }
-    const signedIn = Boolean(ctx.authTokens.customer)
-    const checking = ctx.customerAuthStatus === 'checking'
-    const shopName = bakeries.find((item) => item.id === ctx.checkoutShopId)?.name || ctx.checkoutShopLabel
     if (!cart.length) {
       return (
         <div className="ca-screen has-nav">
@@ -939,61 +1022,125 @@ export default function CustomerApp({ ctx }) {
         </div>
       )
     }
-    const slots = ctx.sortedPickupSlots.filter((slot) => ctx.getPickupSlotState(slot).selectable)
-    let cta
-    if (!signedIn) {
-      cta = <button type="button" className="ca-btn" disabled={checking} onClick={ctx.openCustomerSignIn}>{checking ? 'Signing you in…' : 'Sign in to checkout'}</button>
-    } else if (!ctx.checkoutReady) {
-      cta = <button type="button" className="ca-btn" disabled>{ctx.checkoutBlockers[0]}</button>
-    } else {
-      cta = <button type="button" className="ca-btn" disabled={uiState.submitting} onClick={ctx.submitCartOrder}>{uiState.submitting ? 'Placing order…' : `Place order · ${money(ctx.checkoutTotal)}`}</button>
+    const shop = bakeries.find((item) => item.id === cart[0].shopId) || bakery
+    const delivery = ctx.fulfillmentType === 'delivery'
+    const slots = slotsFor(shop, 6)
+    const slot = slots.find((item) => item.id === checkout.slotId) || slots[0]
+    const setC = (patch) => setCheckout((current) => ({ ...current, ...patch, error: '' }))
+    const savedAddress = details.addresses.find((item) => item.id === checkout.addressId)
+    const address = savedAddress || { line1: checkout.line1.trim(), city: checkout.city, instructions: checkout.instructions.trim() }
+    const savedCard = details.cards.find((item) => item.id === checkout.cardId)
+    const card = savedCard || { name: checkout.cardName.trim(), last4: checkout.cardLast4 }
+    const phone = (checkout.phone || details.phone || '').trim()
+    const blocker = !signedIn ? '' : !slot ? 'No times available' : delivery && !address.line1 ? 'Add a delivery address' : !phone ? 'Add a phone number' : card.last4.length !== 4 ? 'Add a card' : ''
+
+    async function placeOrder() {
+      if (blocker) { setC({ error: blocker }); return }
+      setCheckout((current) => ({ ...current, placing: true, error: '' }))
+      const items = cart.map((item) => ({
+        title: item.title,
+        summary: item.summary || item.config?.summary || '',
+        quantity: item.quantity || 1,
+        unitPrice: item.unitPrice ?? item.totalPrice,
+        totalPrice: (item.unitPrice ?? item.totalPrice) * (item.quantity || 1),
+        config: item.config || null,
+      }))
+      const row = {
+        customer_id: sbUser.id,
+        customer_name: sbUser.user_metadata?.full_name || sbUser.email,
+        customer_email: sbUser.email,
+        customer_phone: phone,
+        bakery_id: shop.id,
+        bakery_name: shop.name,
+        bakery_area: shop.area,
+        bakery_address: shop.address || null,
+        items,
+        subtotal: cartTotals.subtotal,
+        delivery_fee: cartTotals.delivery,
+        service_fee: cartTotals.service,
+        tax: cartTotals.tax,
+        tip: cartTotals.tip,
+        total: cartTotals.total,
+        fulfillment: delivery ? 'delivery' : 'pickup',
+        ready_at: new Date(slot.start).toISOString(),
+        ready_window: slotLabel(slot),
+        dropoff: delivery ? address : null,
+        notes: checkout.notes.trim() || null,
+        payment: { mode: 'test', last4: card.last4, name: card.name },
+        driver_pay: delivery ? DRIVER_PAY : 0,
+      }
+      const { data, error } = await supabase.from('orders').insert(row).select().single()
+      if (error) {
+        setCheckout((current) => ({ ...current, placing: false, error: friendlyError(error) }))
+        return
+      }
+      const next = { ...details, phone }
+      if (delivery && !savedAddress) next.addresses = [{ id: `a${Date.now()}`, ...address }, ...details.addresses].slice(0, 5)
+      if (!savedCard) next.cards = [{ id: `c${Date.now()}`, ...card }, ...details.cards].slice(0, 3)
+      saveDetails(next)
+      setMyOrders((current) => [data, ...current])
+      setCart([])
+      setPlacedId(data.id)
+      setCheckout((current) => ({ ...current, placing: false, notes: '', slotId: '' }))
+      scrollTop()
     }
+
+    let cta
+    if (!signedIn) cta = <button type="button" className="ca-btn" onClick={ctx.openCustomerSignIn}>Sign in to checkout</button>
+    else cta = <button type="button" className="ca-btn" disabled={checkout.placing} onClick={placeOrder}>{checkout.placing ? 'Placing order…' : `Place order · ${money(cartTotals.total)}`}</button>
+
     return (
       <div className="ca-screen">
         <TopBar title="Checkout" onBack={() => go('home')} />
         <div className="ca-pad ca-stack-18 ca-pt-16 ca-pb-24">
           <Segmented label="Delivery or pickup" value={ctx.fulfillmentType} onChange={ctx.setFulfillmentType} options={[{ id: 'delivery', label: 'Delivery' }, { id: 'pickup', label: 'Pickup' }]} />
 
-          {ctx.fulfillmentType === 'pickup' ? (
-            <section className="ca-stack-8">
-              <h2 className="ca-h3">Pickup time at {shopName}</h2>
-              {slots.length ? (
-                <div className="ca-stack-8">
-                  {slots.slice(0, 4).map((slot) => (
-                    <button key={slot.id} type="button" aria-pressed={ctx.pickupSlotId === slot.id} className={`ca-slot ${ctx.pickupSlotId === slot.id ? 'is-selected' : ''}`} onClick={() => ctx.setPickupSlotId(slot.id)}>
-                      <Icon name="clock" size={18} /><span>{ctx.formatPickupWindow(slot)}</span>
-                      <span className="ca-muted ca-small">{slot.capacity - slot.booked} left</span>
-                    </button>
-                  ))}
-                </div>
-              ) : <p className="ca-muted">No pickup times are open right now. Try delivery or check back soon.</p>}
-            </section>
-          ) : (
+          <section className="ca-stack-8">
+            <h2 className="ca-h3">{delivery ? 'Delivery time' : `Pickup time at ${shop.name}`}</h2>
+            <p className="ca-muted ca-small ca-lh">{shop.name} needs {leadLabel(shop.leadHours).replace('Order ', '').replace(' ahead', '')} notice.</p>
+            <div className="ca-stack-8">
+              {slots.map((item) => (
+                <button key={item.id} type="button" aria-pressed={slot?.id === item.id} className={`ca-slot ${slot?.id === item.id ? 'is-selected' : ''}`} onClick={() => setC({ slotId: item.id })}>
+                  <Icon name="clock" size={18} /><span>{slotLabel(item)}</span>
+                </button>
+              ))}
+            </div>
+          </section>
+
+          {delivery ? (
             <section className="ca-stack-8">
               <h2 className="ca-h3">Deliver to</h2>
-              {signedIn && ctx.customerProfile.addresses.length ? (
-                <div className="ca-stack-8">
-                  {ctx.customerProfile.addresses.map((address) => (
-                    <button key={address.id} type="button" aria-pressed={ctx.selectedAddress?.id === address.id} className={`ca-slot ${ctx.selectedAddress?.id === address.id ? 'is-selected' : ''}`} onClick={() => ctx.setSelectedAddressId(address.id)}>
-                      <Icon name="pin" size={18} /><span><strong>{address.label}</strong> · {address.line1}</span>
-                    </button>
-                  ))}
-                </div>
+              {details.addresses.map((item) => (
+                <button key={item.id} type="button" aria-pressed={checkout.addressId === item.id} className={`ca-slot ${checkout.addressId === item.id ? 'is-selected' : ''}`} onClick={() => setC({ addressId: checkout.addressId === item.id ? '' : item.id })}>
+                  <Icon name="pin" size={18} /><span>{item.line1}, {item.city}</span>
+                </button>
+              ))}
+              {!savedAddress ? (
+                <>
+                  {details.addresses.length ? <span className="ca-muted ca-small">Or a new address:</span> : null}
+                  <input className="ca-input" aria-label="Street address" autoComplete="street-address" placeholder="Street address, unit" value={checkout.line1} onChange={(event) => setC({ line1: event.target.value })} />
+                  <select className="ca-select" aria-label="City" value={checkout.city} onChange={(event) => setC({ city: event.target.value })}>
+                    {['Vancouver', 'Burnaby', 'Richmond', 'Surrey', 'Coquitlam', 'North Vancouver', 'West Vancouver', 'New Westminster', 'Delta', 'Langley', 'Port Moody', 'Port Coquitlam', 'Maple Ridge', 'White Rock'].map((city) => <option key={city}>{city}</option>)}
+                  </select>
+                  <input className="ca-input" aria-label="Drop-off notes" placeholder="Buzzer, gate code, where to leave it (optional)" value={checkout.instructions} onChange={(event) => setC({ instructions: event.target.value })} />
+                </>
               ) : null}
-              {signedIn ? (
-                <button type="button" className="ca-link" onClick={() => { setAccountPage('addresses'); go('account'); setAccountPage('addresses') }}>+ Add an address</button>
-              ) : <p className="ca-muted">Sign in to add your address.</p>}
             </section>
-          )}
+          ) : null}
+
+          <section className="ca-stack-8">
+            <h2 className="ca-h3">Phone</h2>
+            <input className="ca-input" type="tel" autoComplete="tel" aria-label="Phone number" placeholder={delivery ? 'So the driver can reach you' : 'So the bakery can reach you'} value={checkout.phone || details.phone} onChange={(event) => setC({ phone: event.target.value })} />
+          </section>
 
           <section className="ca-stack-10">
-            <h2 className="ca-h3">Your order</h2>
+            <h2 className="ca-h3">Your order from {shop.name}</h2>
             {cart.map((item) => (
               <div key={item.id} className="ca-cart-item">
-                <Photo tint="#F3E8E2" className="ca-thumb-sm" />
+                <Photo tint={shop.tint} icon={shop.icon} className="ca-thumb-sm" />
                 <span className="ca-cart-text"><strong>{item.title}</strong><span className="ca-muted ca-small">{item.summary || ctx.toDesignSummary(item.config)}</span></span>
                 <span className="ca-cart-side">
-                  <strong>{money(item.totalPrice)}</strong>
+                  <strong>{money((item.unitPrice ?? item.totalPrice) * (item.quantity || 1))}</strong>
                   <span className="ca-qty">
                     <button type="button" aria-label={`One less ${item.title}`} onClick={() => ctx.updateCartItemQuantity(item.id, -1)}>−</button>
                     <span>{item.quantity || 1}</span>
@@ -1002,72 +1149,103 @@ export default function CustomerApp({ ctx }) {
                 </span>
               </div>
             ))}
+            <input className="ca-input" aria-label="Note for the bakery" placeholder="Note for the bakery (allergies, colours…) (optional)" value={checkout.notes} onChange={(event) => setC({ notes: event.target.value })} />
           </section>
+
+          {delivery ? (
+            <section className="ca-stack-8">
+              <h2 className="ca-h3">Tip your driver</h2>
+              <div className="ca-grid-4">
+                {TIP_OPTIONS.map((amount) => (
+                  <button key={amount} type="button" aria-pressed={Number(checkout.tip) === amount} className={`ca-size ${Number(checkout.tip) === amount ? 'is-selected' : ''}`} onClick={() => setC({ tip: amount })}>
+                    <strong className="ca-small-strong">{amount ? money(amount) : 'None'}</strong>
+                  </button>
+                ))}
+              </div>
+              <span className="ca-muted ca-small">100% of your tip goes to the driver.</span>
+            </section>
+          ) : null}
 
           {signedIn ? (
             <section className="ca-stack-8">
               <h2 className="ca-h3">Payment</h2>
-              {ctx.customerProfile.cards.length ? ctx.customerProfile.cards.map((card) => {
-                const chosen = ctx.paymentCard.last4 === card.last4 && ctx.paymentCard.brand === card.brand
-                return (
-                  <button key={card.id} type="button" aria-pressed={chosen} className={`ca-slot ${chosen ? 'is-selected' : ''}`} onClick={() => ctx.setPaymentCard({ brand: card.brand, last4: card.last4, name: card.name })}>
-                    <Icon name="card" size={18} /><span>{card.brand} •••• {card.last4}</span>
-                  </button>
-                )
-              }) : (
+              {details.cards.map((item) => (
+                <button key={item.id} type="button" aria-pressed={checkout.cardId === item.id} className={`ca-slot ${checkout.cardId === item.id ? 'is-selected' : ''}`} onClick={() => setC({ cardId: checkout.cardId === item.id ? '' : item.id })}>
+                  <Icon name="card" size={18} /><span>Card •••• {item.last4}</span>
+                </button>
+              ))}
+              {!savedCard ? (
                 <div className="ca-grid-2">
-                  <input className="ca-input" aria-label="Name on card" placeholder="Name on card" value={ctx.paymentCard.name} onChange={(event) => ctx.setPaymentCard((current) => ({ ...current, name: event.target.value }))} />
-                  <input className="ca-input" aria-label="Last 4 digits" inputMode="numeric" placeholder="Last 4 digits" value={ctx.paymentCard.last4} onChange={(event) => ctx.setPaymentCard((current) => ({ ...current, last4: event.target.value.replace(/\D/g, '').slice(0, 4) }))} />
+                  <input className="ca-input" aria-label="Name on card" placeholder="Name on card" value={checkout.cardName} onChange={(event) => setC({ cardName: event.target.value })} />
+                  <input className="ca-input" aria-label="Last 4 digits" inputMode="numeric" placeholder="Last 4 digits" value={checkout.cardLast4} onChange={(event) => setC({ cardLast4: event.target.value.replace(/\D/g, '').slice(0, 4) })} />
                 </div>
-              )}
+              ) : null}
               <p className="ca-muted ca-small">Test mode: no card is charged yet.</p>
             </section>
           ) : null}
 
           <dl className="ca-totals">
-            <dt>Subtotal</dt><dd>{money(ctx.cartSubtotal)}</dd>
-            {ctx.fulfillmentType === 'delivery' ? <><dt>Delivery fee</dt><dd>{money(ctx.deliveryFee)}</dd></> : null}
-            <dt>Service fee</dt><dd>{money(ctx.serviceFee)}</dd>
-            <dt>GST</dt><dd>{money(ctx.gstHst)}</dd>
-            <dt className="ca-total">Total</dt><dd className="ca-total">{money(ctx.checkoutTotal)}</dd>
+            <dt>Subtotal</dt><dd>{money(cartTotals.subtotal)}</dd>
+            {delivery ? <><dt>Delivery fee</dt><dd>{money(cartTotals.delivery)}</dd></> : null}
+            <dt>Service fee</dt><dd>{money(cartTotals.service)}</dd>
+            <dt>GST</dt><dd>{money(cartTotals.tax)}</dd>
+            {cartTotals.tip ? <><dt>Driver tip</dt><dd>{money(cartTotals.tip)}</dd></> : null}
+            <dt className="ca-total">Total</dt><dd className="ca-total">{money(cartTotals.total)}</dd>
           </dl>
+          {checkout.error ? <p className="ca-toast is-error is-inline" role="alert">{checkout.error}</p> : null}
         </div>
         <StickyBar>{cta}</StickyBar>
       </div>
     )
   }
 
-  function renderOrderDetail(order, onClose) {
+  function renderOrderDetail(order, onClose, justPlaced) {
     const status = order.status || 'new'
     const cancelled = status === 'cancelled'
-    const currentIndex = Math.max(0, ORDER_STEPS.findIndex((step) => step.statuses.includes(status)))
-    const shopName = bakeries.find((item) => item.id === order.shopId)?.name || order.shopLabel || 'Your bakery'
-    const headline = cancelled ? 'This order was cancelled' : ORDER_STEPS[currentIndex].label
+    const steps = order.fulfillment === 'delivery' ? DELIVERY_STEPS : PICKUP_STEPS
+    const currentIndex = Math.max(0, steps.findIndex((step) => step.id === status))
+    let headline = cancelled ? 'This order was cancelled' : steps[currentIndex].label
+    if (status === 'new') headline = justPlaced ? 'Order placed!' : 'Waiting for the bakery to confirm'
+    const driverLine = order.fulfillment === 'delivery' && !cancelled && !['delivered'].includes(status)
+      ? (order.driver_name ? `${order.driver_name.split(' ')[0]} is your driver` : ['confirmed', 'baking', 'ready'].includes(status) ? 'Finding a driver near the bakery' : '')
+      : ''
+
+    async function cancel() {
+      const { error } = await supabase.rpc('customer_cancel_order', { p_order: order.id })
+      if (error) setUiState((current) => ({ ...current, error: friendlyError(error) }))
+      loadOrders()
+    }
+
     return (
       <div className="ca-screen">
-        <div className="ca-map" aria-hidden="true"><Icon name="pin" size={28} /></div>
+        <div className="ca-map" aria-hidden="true"><Icon name={order.fulfillment === 'delivery' ? 'pin' : 'store'} size={28} /></div>
         <button type="button" className="ca-float-btn ca-float-left ca-float-fixed" aria-label="Close" onClick={onClose}><Icon name="close" size={18} /></button>
         <div className="ca-sheet ca-pad ca-stack-16">
           <div className="ca-stack-4">
-            {order.pickupSlot ? <span className="ca-accent-text ca-small">Pickup {ctx.formatPickupWindow(order.pickupSlot)}</span> : null}
+            <span className="ca-accent-text ca-small">{order.fulfillment === 'delivery' ? 'Delivery' : 'Pickup'} · {order.ready_window}</span>
             <h1 className="ca-h1">{headline}</h1>
-            <span className="ca-muted">{shopName} · Order {String(order.id).slice(-6)}</span>
+            <span className="ca-muted">{order.bakery_name} · Order #{String(order.id).slice(0, 6).toUpperCase()}</span>
+            {driverLine ? <span className="ca-small ca-strong-muted">{driverLine}</span> : null}
           </div>
           {!cancelled ? (
             <ol className="ca-timeline">
-              {ORDER_STEPS.map((step, index) => (
+              {steps.map((step, index) => (
                 <li key={step.id} className={index < currentIndex ? 'is-done' : index === currentIndex ? 'is-current' : ''}>
                   <span className="ca-dot">{index < currentIndex ? <Icon name="check" size={13} /> : null}</span>
-                  <span>{step.id === 'done' && order.fulfillment === 'delivery' ? 'Delivered' : step.label}</span>
+                  <span>{step.label}</span>
                 </li>
               ))}
             </ol>
           ) : null}
           <div className="ca-summary">
-            <strong>{money(order.total)}</strong>
-            <span>{order.designSnapshot?.summary || (order.designSnapshot ? ctx.toDesignSummary(order.designSnapshot) : 'Cake order')}</span>
+            {(order.items || []).map((item, index) => <span key={index}><strong>{item.quantity || 1}× {item.title}</strong>{item.summary ? ` · ${item.summary}` : ''}</span>)}
+            <strong>Total {money(order.total)}</strong>
+            {order.fulfillment === 'delivery' && order.dropoff ? <span className="ca-muted">To {order.dropoff.line1}, {order.dropoff.city}</span> : null}
+            {order.fulfillment === 'pickup' ? <span className="ca-muted">Pick up at {[order.bakery_address, order.bakery_area].filter(Boolean).join(', ')}</span> : null}
           </div>
+          {status === 'new' ? <button type="button" className="ca-btn ca-btn-ghost" onClick={cancel}>Cancel order</button> : null}
           <button type="button" className="ca-btn ca-btn-ghost" onClick={() => { setAccountPage('help'); go('account'); setAccountPage('help') }}><Icon name="help" size={18} />Get help with this order</button>
+          <p className="ca-muted ca-small">This page updates on its own.</p>
         </div>
       </div>
     )
@@ -1075,11 +1253,9 @@ export default function CustomerApp({ ctx }) {
 
   function renderOrders() {
     if (openOrderId) {
-      const order = ctx.customerOrders.find((item) => item.id === openOrderId)
+      const order = myOrders.find((item) => item.id === openOrderId)
       if (order) return renderOrderDetail(order, () => setOpenOrderId(''))
     }
-    const signedIn = Boolean(ctx.authTokens.customer)
-    const orders = ctx.customerOrders.slice().sort((a, b) => new Date(b.createdAt || 0) - new Date(a.createdAt || 0))
     return (
       <div className="ca-screen has-nav">
         <div className="ca-pad ca-pt-16"><h1 className="ca-h1">Orders</h1></div>
@@ -1087,7 +1263,7 @@ export default function CustomerApp({ ctx }) {
           <div className="ca-pad ca-section">
             <button type="button" className="ca-list-row is-highlight" onClick={() => go('checkout')}>
               <span className="ca-list-icon"><Icon name="cart" /></span>
-              <span className="ca-list-text"><strong>Your cart · {cartCount} {cartCount === 1 ? 'cake' : 'cakes'}</strong><span className="ca-muted">{money(ctx.cartSubtotal)} · Continue to checkout</span></span>
+              <span className="ca-list-text"><strong>Your cart · {cartCount} {cartCount === 1 ? 'item' : 'items'}</strong><span className="ca-muted">{money(cartTotals.subtotal)} · Continue to checkout</span></span>
               <Icon name="chevron" size={18} />
             </button>
           </div>
@@ -1098,12 +1274,12 @@ export default function CustomerApp({ ctx }) {
               <strong>Sign in to see your orders</strong>
               <button type="button" className="ca-btn ca-mt-12" onClick={ctx.openCustomerSignIn}>Sign in</button>
             </div>
-          ) : orders.length ? orders.map((order) => (
+          ) : myOrders.length ? myOrders.map((order) => (
             <button key={order.id} type="button" className="ca-list-row" onClick={() => setOpenOrderId(order.id)}>
-              <span className="ca-list-icon"><Icon name="cake" /></span>
+              <span className="ca-list-icon"><Icon name={order.fulfillment === 'delivery' ? 'pin' : 'cake'} /></span>
               <span className="ca-list-text">
-                <strong>{bakeries.find((item) => item.id === order.shopId)?.name || 'Cake order'}</strong>
-                <span className="ca-muted">{ctx.formatStatus(order.status)} · {money(order.total)}</span>
+                <strong>{order.bakery_name}</strong>
+                <span className="ca-muted">{STATUS_TEXT[order.status] || order.status} · {order.ready_window} · {money(order.total)}</span>
               </span>
               <Icon name="chevron" size={18} />
             </button>
@@ -1114,9 +1290,7 @@ export default function CustomerApp({ ctx }) {
   }
 
   function renderAccount() {
-    const signedIn = Boolean(ctx.authTokens.customer)
-    const session = ctx.accountSessions.customer
-    const name = ctx.customerProfile.fullName || session?.name || 'Guest'
+    const name = sbUser?.user_metadata?.full_name || sbUser?.email || 'Guest'
     const back = () => setAccountPage('main')
 
     if (accountPage === 'addresses') {
@@ -1124,14 +1298,15 @@ export default function CustomerApp({ ctx }) {
         <div className="ca-screen">
           <TopBar title="Addresses" onBack={back} />
           <div className="ca-pad ca-stack-12 ca-pt-16">
-            {ctx.customerProfile.addresses.map((address) => (
-              <div key={address.id} className="ca-list-row is-static"><span className="ca-list-icon"><Icon name="pin" /></span><span className="ca-list-text"><strong>{address.label}</strong><span className="ca-muted">{address.line1}{address.instructions ? ` · ${address.instructions}` : ''}</span></span></div>
+            {!details.addresses.length ? <p className="ca-muted">No saved addresses yet. Addresses you deliver to are saved here.</p> : null}
+            {details.addresses.map((address) => (
+              <div key={address.id} className="ca-list-row is-static">
+                <span className="ca-list-icon"><Icon name="pin" /></span>
+                <span className="ca-list-text"><strong>{address.line1}</strong><span className="ca-muted">{address.city}{address.instructions ? ` · ${address.instructions}` : ''}</span></span>
+                <button type="button" className="ca-link" onClick={() => saveDetails({ ...details, addresses: details.addresses.filter((item) => item.id !== address.id) })}>Remove</button>
+              </div>
             ))}
-            <h2 className="ca-h3 ca-mt-12">Add an address</h2>
-            <input className="ca-input" aria-label="Label" placeholder="Label (Home, Work…)" value={ctx.addressDraft.label} onChange={(event) => ctx.setAddressDraft((current) => ({ ...current, label: event.target.value }))} />
-            <input className="ca-input" aria-label="Street address" placeholder="Street address" value={ctx.addressDraft.line1} onChange={(event) => ctx.setAddressDraft((current) => ({ ...current, line1: event.target.value }))} />
-            <input className="ca-input" aria-label="Drop-off notes" placeholder="Drop-off notes (optional)" value={ctx.addressDraft.instructions} onChange={(event) => ctx.setAddressDraft((current) => ({ ...current, instructions: event.target.value }))} />
-            <button type="button" className="ca-btn" disabled={!ctx.addressDraft.label.trim() || !ctx.addressDraft.line1.trim() || uiState.updating} onClick={ctx.addProfileAddress}>Save address</button>
+            <p className="ca-muted ca-small">Saved on this device.</p>
           </div>
         </div>
       )
@@ -1141,19 +1316,15 @@ export default function CustomerApp({ ctx }) {
         <div className="ca-screen">
           <TopBar title="Payment methods" onBack={back} />
           <div className="ca-pad ca-stack-12 ca-pt-16">
-            {ctx.customerProfile.cards.map((card) => (
-              <div key={card.id} className="ca-list-row is-static"><span className="ca-list-icon"><Icon name="card" /></span><span className="ca-list-text"><strong>{card.brand} •••• {card.last4}</strong><span className="ca-muted">{card.name}</span></span></div>
+            {!details.cards.length ? <p className="ca-muted">No saved cards yet. Add one at checkout.</p> : null}
+            {details.cards.map((card) => (
+              <div key={card.id} className="ca-list-row is-static">
+                <span className="ca-list-icon"><Icon name="card" /></span>
+                <span className="ca-list-text"><strong>Card •••• {card.last4}</strong><span className="ca-muted">{card.name}</span></span>
+                <button type="button" className="ca-link" onClick={() => saveDetails({ ...details, cards: details.cards.filter((item) => item.id !== card.id) })}>Remove</button>
+              </div>
             ))}
-            <h2 className="ca-h3 ca-mt-12">Add a card</h2>
-            <input className="ca-input" aria-label="Name on card" placeholder="Name on card" value={ctx.cardDraft.name} onChange={(event) => ctx.setCardDraft((current) => ({ ...current, name: event.target.value }))} />
-            <div className="ca-grid-2">
-              <select className="ca-select" aria-label="Card brand" value={ctx.cardDraft.brand} onChange={(event) => ctx.setCardDraft((current) => ({ ...current, brand: event.target.value }))}>
-                {['Visa', 'Mastercard', 'Amex'].map((brand) => <option key={brand}>{brand}</option>)}
-              </select>
-              <input className="ca-input" aria-label="Last 4 digits" inputMode="numeric" placeholder="Last 4 digits" value={ctx.cardDraft.last4} onChange={(event) => ctx.setCardDraft((current) => ({ ...current, last4: event.target.value.replace(/\D/g, '').slice(0, 4) }))} />
-            </div>
-            <button type="button" className="ca-btn" disabled={ctx.cardDraft.last4.length !== 4 || uiState.updating} onClick={ctx.addProfileCard}>Save card</button>
-            <p className="ca-muted ca-small">Test mode: only the brand and last 4 digits are stored.</p>
+            <p className="ca-muted ca-small">Test mode: no card is charged, and only the last 4 digits are kept, on this device.</p>
           </div>
         </div>
       )
@@ -1184,8 +1355,8 @@ export default function CustomerApp({ ctx }) {
     }
 
     const rows = [
-      { id: 'addresses', icon: 'pin', label: 'Addresses', sub: `${ctx.customerProfile.addresses.length || 'No'} saved` },
-      { id: 'payment', icon: 'card', label: 'Payment methods', sub: `${ctx.customerProfile.cards.length || 'No'} saved` },
+      { id: 'addresses', icon: 'pin', label: 'Addresses', sub: `${details.addresses.length || 'No'} saved` },
+      { id: 'payment', icon: 'card', label: 'Payment methods', sub: `${details.cards.length || 'No'} saved` },
       { id: 'settings', icon: 'gear', label: 'Settings', sub: 'Notifications, preferences, privacy' },
       { id: 'help', icon: 'help', label: 'Help', sub: 'Order issues, cancelling, refunds' },
     ]
@@ -1195,7 +1366,7 @@ export default function CustomerApp({ ctx }) {
           <span className="ca-avatar">{name.slice(0, 1).toUpperCase()}</span>
           <span className="ca-stack-2">
             <strong className="ca-profile-name">{name}</strong>
-            <span className="ca-muted ca-small">{signedIn ? `${ctx.customerProfile.email || session?.email || ''} · Signed in with Google` : 'Sign in to save details and order'}</span>
+            <span className="ca-muted ca-small">{signedIn ? `${sbUser.email} · Signed in with Google` : 'Sign in to save details and order'}</span>
           </span>
         </div>
         {signedIn ? (
@@ -1218,6 +1389,19 @@ export default function CustomerApp({ ctx }) {
             </li>
           ))}
         </ul>
+        <div className="ca-pad ca-section">
+          <h2 className="ca-overline">Work with us</h2>
+          <a className="ca-list-row is-plain ca-a" href="/driver">
+            <span className="ca-list-icon is-plain"><Icon name="pin" /></span>
+            <span className="ca-list-text"><strong>Deliver with us</strong><span className="ca-muted ca-small">Earn delivering cakes in your area</span></span>
+            <Icon name="chevron" size={18} />
+          </a>
+          <a className="ca-list-row is-plain ca-a" href="/bakery">
+            <span className="ca-list-icon is-plain"><Icon name="store" /></span>
+            <span className="ca-list-text"><strong>Sell your cakes with us</strong><span className="ca-muted ca-small">For bakeries and home bakers with a food permit</span></span>
+            <Icon name="chevron" size={18} />
+          </a>
+        </div>
         {signedIn ? <div className="ca-pad ca-section"><button type="button" className="ca-btn ca-btn-ghost" disabled={uiState.authUpdating} onClick={ctx.handleCustomerLogout}>{uiState.authUpdating ? 'Signing out…' : 'Sign out'}</button></div> : null}
       </div>
     )

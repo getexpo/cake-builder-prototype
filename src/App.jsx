@@ -1,12 +1,9 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { createClient } from '@supabase/supabase-js'
+import { supabase } from './supabaseClient.js'
 import './App.css'
 import CustomerApp from './CustomerApp.jsx'
 
 const ENV_API_BASE_URL = import.meta.env.VITE_API_BASE_URL?.trim()
-const SUPABASE_URL = import.meta.env.VITE_SUPABASE_URL?.trim()
-const SUPABASE_ANON_KEY = import.meta.env.VITE_SUPABASE_ANON_KEY?.trim()
-const supabase = SUPABASE_URL && SUPABASE_ANON_KEY ? createClient(SUPABASE_URL, SUPABASE_ANON_KEY) : null
 const API_BASE_CANDIDATES = ENV_API_BASE_URL
   ? [ENV_API_BASE_URL]
   : ['http://localhost:4224', 'http://localhost:4222', 'http://localhost:4220', 'http://localhost:4218', 'http://localhost:4204', 'http://localhost:4202', 'http://localhost:4194', 'http://localhost:4192', 'http://localhost:4176', 'http://localhost:4174', 'http://localhost:4172', 'http://localhost:4170', 'http://localhost:4164', 'http://localhost:4160', 'http://localhost:4126', 'http://localhost:4124', 'http://localhost:4122', 'http://localhost:4120', 'http://localhost:4020']

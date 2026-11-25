@@ -2,6 +2,13 @@ import { StrictMode } from 'react'
 import { createRoot } from 'react-dom/client'
 import './index.css'
 import App from './App.jsx'
+import AdminApp from './AdminApp.jsx'
+import BakeryApp from './BakeryApp.jsx'
+import DriverApp from './DriverApp.jsx'
+
+// Each partner type has its own address on the same site.
+const path = window.location.pathname.replace(/\/+$/, '')
+const Root = path.startsWith('/driver') ? DriverApp : path.startsWith('/bakery') ? BakeryApp : path.startsWith('/admin') ? AdminApp : App
 
 window.addEventListener('error', (event) => {
   const message = [
@@ -20,6 +27,6 @@ window.addEventListener('unhandledrejection', (event) => {
 
 createRoot(document.getElementById('root')).render(
   <StrictMode>
-    <App />
+    <Root />
   </StrictMode>,
 )

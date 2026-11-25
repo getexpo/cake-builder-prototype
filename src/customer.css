@@ -264,3 +264,7 @@
 .ca-cat.is-active { background: var(--ink); border-color: var(--ink); color: #FFFFFF !important; }
 .ca-pill:disabled { opacity: 0.4; }
 .ca-store-photo { color: rgba(28, 25, 23, 0.35); }
+
+/* partner links + tip grid */
+.ca-a { color: inherit; text-decoration: none; }
+.ca-grid-4 { display: grid; gap: 8px; grid-template-columns: repeat(4, minmax(0, 1fr)); }
