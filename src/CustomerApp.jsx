@@ -3,6 +3,8 @@ import { CATEGORIES, SHOPS } from './catalog.js'
 import { friendlyError, supabase } from './supabaseClient.js'
 import { STATUS_HINT, addDays, dateLabel, dayStatus, earliestDay, leadFor, noticeLabel, timeLabel, timesOn, vanDate, vanMoment } from './schedule.js'
 import { ChatThread, ConversationList, MonthCalendar, useConversations } from './widgets.jsx'
+import { OccasionsScreen, dismissPrompt, promptDismissed, upcoming, useOccasions } from './Occasions.jsx'
+import { countdown, occasionTitle } from './occasions.js'
 import './customer.css'
 
 // Customer-facing app (redesign). All data and actions come from App via `ctx`,
@@ -425,10 +427,13 @@ export default function CustomerApp({ ctx }) {
   const signedIn = Boolean(sbUser)
   const cartShop = cart.length ? bakeries.find((item) => item.id === cart[0].shopId) : null
   const [conversations, loadConversations] = useConversations(sbUser ? { customerId: sbUser.id } : null, Boolean(sbUser))
+  const occasionData = useOccasions(sbUser)
+  const [hidePrompt, setHidePrompt] = useState(promptDismissed)
   const unreadMessages = conversations.reduce((sum, item) => sum + (item.customer_unread || 0), 0)
 
   useEffect(() => {
-    if (new URLSearchParams(window.location.search).get('view') === 'messages') setView('messages')
+    const wanted = new URLSearchParams(window.location.search).get('view')
+    if (wanted === 'messages' || wanted === 'occasions') setView(wanted)
   }, [setView])
 
   // How booked each day is, so full days are greyed out.
@@ -589,6 +594,7 @@ export default function CustomerApp({ ctx }) {
             <Icon name="search" size={18} /><span>Search cakes, cupcakes, bakeries</span>
           </button>
         </div>
+        {renderOccasionCard()}
         <div className="ca-cats" role="tablist" aria-label="Shop type">
           {CATEGORIES.map((item) => (
             <button key={item.id} type="button" role="tab" aria-selected={category === item.id} className={`ca-cat ${category === item.id ? 'is-active' : ''}`} onClick={() => setCategory(item.id)}>{item.label}</button>
@@ -597,6 +603,38 @@ export default function CustomerApp({ ctx }) {
         <div className="ca-pad ca-section">
           <h2 className="ca-h2">{category === 'all' ? `${bakeries.length} bakeries near you` : `${CATEGORIES.find((item) => item.id === category)?.label} · ${shown.length}`}</h2>
           <div className="ca-stack-18">{shown.map(renderBakeryCard)}</div>
+        </div>
+      </div>
+    )
+  }
+
+  function renderOccasionCard() {
+    if (!signedIn || !occasionData.loaded) return null
+    const soon = upcoming(occasionData.list, 45).slice(0, 3)
+    if (soon.length) {
+      return (
+        <div className="ca-pad ca-section">
+          <div className="ca-occasion-card">
+            <div className="ca-row-between"><strong>Coming up</strong><button type="button" className="ca-link" onClick={() => go('occasions')}>All dates</button></div>
+            {soon.map((item) => (
+              <div key={item.id} className="ca-row-between ca-small">
+                <span>{occasionTitle(item)}</span><span className={item.days <= 14 ? 'ca-accent-text' : 'ca-muted'}>{countdown(item.days)}</span>
+              </div>
+            ))}
+          </div>
+        </div>
+      )
+    }
+    if (occasionData.list.length || hidePrompt) return null
+    return (
+      <div className="ca-pad ca-section">
+        <div className="ca-occasion-card is-prompt">
+          <strong>Never miss a cake day</strong>
+          <span className="ca-small ca-lh">Save birthdays, anniversaries and big moments. We’ll text you 2 weeks before so there’s time for a custom cake.</span>
+          <div className="ca-row-start">
+            <button type="button" className="ca-btn ca-btn-small" onClick={() => go('occasions')}>Add dates</button>
+            <button type="button" className="ca-link" onClick={() => { dismissPrompt(); setHidePrompt(true) }}>Not now</button>
+          </div>
         </div>
       </div>
     )
@@ -1494,6 +1532,7 @@ export default function CustomerApp({ ctx }) {
     const rows = [
       { id: 'addresses', icon: 'pin', label: 'Addresses', sub: `${details.addresses.length || 'No'} saved` },
       { id: 'payment', icon: 'card', label: 'Payment methods', sub: `${details.cards.length || 'No'} saved` },
+      { id: 'occasions', icon: 'calendar', label: 'Occasions and reminders', sub: 'Birthdays and big days, with reminders' },
       { id: 'settings', icon: 'gear', label: 'Settings', sub: 'Notifications, preferences, privacy' },
       { id: 'help', icon: 'help', label: 'Help', sub: 'Order issues, cancelling, refunds' },
     ]
@@ -1518,7 +1557,7 @@ export default function CustomerApp({ ctx }) {
         <ul className="ca-pad ca-menu-list">
           {rows.filter((row) => signedIn || ['settings', 'help'].includes(row.id)).map((row) => (
             <li key={row.id}>
-              <button type="button" className="ca-list-row is-plain" onClick={() => (row.id === 'settings' ? go('settings') : setAccountPage(row.id))}>
+              <button type="button" className="ca-list-row is-plain" onClick={() => (row.id === 'settings' || row.id === 'occasions' ? go(row.id) : setAccountPage(row.id))}>
                 <span className="ca-list-icon is-plain"><Icon name={row.icon} /></span>
                 <span className="ca-list-text"><strong>{row.label}</strong><span className="ca-muted ca-small">{row.sub}</span></span>
                 <Icon name="chevron" size={18} />
@@ -1634,6 +1673,7 @@ export default function CustomerApp({ ctx }) {
   else if (view === 'account') screen = renderAccount()
   else if (view === 'settings') screen = renderSettings()
   else if (view === 'messages') screen = renderMessages()
+  else if (view === 'occasions') screen = <OccasionsScreen user={sbUser} phone={details.phone} data={occasionData} onBack={() => go('account')} onShop={() => go('home')} onSignIn={ctx.openCustomerSignIn} TopBar={TopBar} Icon={Icon} />
   else screen = renderHome()
 
   const showNav = ['home', 'search', 'orders', 'account'].includes(view) && !(view === 'orders' && openOrderId) && !(view === 'account' && accountPage !== 'main')
