@@ -410,6 +410,8 @@ export default function CustomerApp({ ctx }) {
   const [placedIds, setPlacedIds] = useState([])
   const [dateOpenFor, setDateOpenFor] = useState(null)
   const [dayLoad, setDayLoad] = useState({})
+  const [needDate, setNeedDate] = useState('')
+  const [needOpen, setNeedOpen] = useState(false)
   const [chat, setChat] = useState(null)
   const [chatReturn, setChatReturn] = useState('home')
 
@@ -500,17 +502,23 @@ export default function CustomerApp({ ctx }) {
     setCustomerShopId(shop.id)
     setBuild(newBuild(shop))
     setCustom(newCustom(shop))
+    setNeedDate('')
+    setNeedOpen(false)
     go('build')
   }
 
   function addItemToCart(item) {
     const otherShop = cart.find((entry) => entry.shopId && entry.shopId !== item.shopId)
     if (otherShop) {
-      setPendingItem(item)
+      const target = bakeries.find((entry) => entry.id === item.shopId) || bakery
+      const lead = leadFor(item, target)
+      setPendingItem({ ...item, date: needDate && dayStatus(needDate, target, lead) === 'ok' ? needDate : '' })
       return
     }
     const shop = bakeries.find((entry) => entry.id === item.shopId) || bakery
-    const dated = { ...item, date: item.date || earliestDay(shop, leadFor(item, shop), dayLoad) }
+    const lead = leadFor(item, shop)
+    const picked = needDate && dayStatus(needDate, shop, lead, dayLoad) === 'ok' ? needDate : ''
+    const dated = { ...item, date: item.date || picked || earliestDay(shop, lead, dayLoad) }
     setCart((current) => [...current, dated])
     setUiState((current) => ({ ...current, error: '', message: `${item.title} added to your cart.` }))
     go('checkout')
@@ -518,7 +526,7 @@ export default function CustomerApp({ ctx }) {
 
   function confirmNewCart() {
     const shop = bakeries.find((entry) => entry.id === pendingItem.shopId) || bakery
-    setCart([{ ...pendingItem, date: earliestDay(shop, leadFor(pendingItem, shop)) }])
+    setCart([{ ...pendingItem, date: pendingItem.date || earliestDay(shop, leadFor(pendingItem, shop)) }])
     setPendingItem(null)
     go('checkout')
   }
@@ -604,6 +612,39 @@ export default function CustomerApp({ ctx }) {
           <h2 className="ca-h2">{category === 'all' ? `${bakeries.length} bakeries near you` : `${CATEGORIES.find((item) => item.id === category)?.label} · ${shown.length}`}</h2>
           <div className="ca-stack-18">{shown.map(renderBakeryCard)}</div>
         </div>
+      </div>
+    )
+  }
+
+  // "When do you need it?" picker on item and build screens.
+  function renderNeedDate(lead) {
+    const load = cartShop?.id === bakery.id ? dayLoad : {}
+    const first = earliestDay(bakery, lead, load)
+    const value = needDate && dayStatus(needDate, bakery, lead, load) === 'ok' ? needDate : first
+    return (
+      <div className="ca-pad ca-section ca-stack-8">
+        <span className="ca-label">When do you need it?</span>
+        <div className="ca-row-between">
+          <button type="button" className={`cx-date-btn ${needOpen ? 'is-open' : ''}`} aria-expanded={needOpen} onClick={() => setNeedOpen(!needOpen)}>
+            <Icon name="calendar" size={16} />{value ? dateLabel(value, true) : 'Pick a date'}<span className="ca-accent-text">{needOpen ? 'Done' : 'Change'}</span>
+          </button>
+          <span className="cx-note">{noticeLabel(lead)}</span>
+        </div>
+        {needOpen ? (
+          <>
+            <MonthCalendar
+              compact
+              value={value}
+              initial={value}
+              onPick={(day) => { setNeedDate(day); setNeedOpen(false) }}
+              cell={(day) => {
+                const status = dayStatus(day, bakery, lead, load)
+                return { disabled: status !== 'ok', note: STATUS_HINT[status] || '', tone: status === 'full' ? 'full' : status === 'closed' || status === 'blocked' ? 'off' : '' }
+              }}
+            />
+            <span className="cx-note">Greyed-out days: not enough notice for this item, the shop is closed, or it's fully booked.</span>
+          </>
+        ) : null}
       </div>
     )
   }
@@ -712,7 +753,7 @@ export default function CustomerApp({ ctx }) {
             <span className="ca-menu-thumb is-accent"><Icon name={bakery.icon} size={32} /><span className="ca-plus" aria-hidden="true"><Icon name="plus" size={16} /></span></span>
           </button>
           {items.map((item) => (
-            <button key={item.id} type="button" className="ca-menu-row" onClick={() => { setItemId(item.id); setItemNote(''); go('item') }}>
+            <button key={item.id} type="button" className="ca-menu-row" onClick={() => { setItemId(item.id); setItemNote(''); setNeedDate(''); setNeedOpen(false); go('item') }}>
               <span className="ca-menu-text">
                 <span className="ca-menu-title">{item.title}</span>
                 <span className="ca-muted">{item.detail}</span>
@@ -772,6 +813,7 @@ export default function CustomerApp({ ctx }) {
           <label htmlFor="ca-item-note" className="ca-label">Message on cake <span className="ca-muted">· optional</span></label>
           <input id="ca-item-note" className="ca-input" maxLength={40} placeholder="e.g. Happy 30th, Maya!" value={itemNote} onChange={(event) => setItemNote(event.target.value)} />
         </div>
+        {renderNeedDate(Number(item.leadHours) || bakery.leadHours)}
         <StickyBar>
           <button type="button" className="ca-btn" onClick={addPreset}>Add to cart · {money(item.price)}</button>
         </StickyBar>
@@ -964,6 +1006,7 @@ export default function CustomerApp({ ctx }) {
             <span>{buildSummary(build, bakery)}</span>
           </div>
         </div>
+        {renderNeedDate(Number(bakery.builder?.leadHours) || bakery.leadHours)}
         <StickyBar>
           <button type="button" className="ca-btn" onClick={addToCart}>Add to cart · {money(price)}</button>
         </StickyBar>
@@ -1076,6 +1119,7 @@ export default function CustomerApp({ ctx }) {
             <span>{summary || 'Make your picks above'}</span>
           </div>
         </div>
+        {renderNeedDate(Number(bakery.builder?.leadHours) || bakery.leadHours)}
         <StickyBar>
           <button type="button" className="ca-btn" disabled={Boolean(missing)} onClick={addToCart}>{missing || `Add to cart · ${money(price)}`}</button>
         </StickyBar>

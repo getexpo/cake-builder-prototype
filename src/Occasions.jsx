@@ -48,7 +48,26 @@ export function dismissPrompt() {
 }
 
 function blankForm() {
-  return { id: null, person: '', relation: '', kind: 'birthday', month: '', day: '', year: '', repeats: true, remind_days: [14, 3], notes: '' }
+  return { id: null, person: '', relation: '', kind: 'birthday', date: '', auto_date: false, repeats: true, remind_days: [14, 3], notes: '' }
+}
+
+const pad = (n) => String(n).padStart(2, '0')
+
+// Next official date of a holiday that follows a rule (e.g. Mother's Day), as YYYY-MM-DD.
+function officialDate(kind) {
+  const today = vanDate()
+  for (const year of [Number(today.slice(0, 4)), Number(today.slice(0, 4)) + 1]) {
+    const rule = holidayDate(kind, year)
+    if (!rule) return ''
+    const date = `${year}-${pad(rule.month)}-${pad(rule.day)}`
+    if (date >= today) return date
+  }
+  return ''
+}
+
+function formFor(item) {
+  const year = item.year || Number((item.next || vanDate()).slice(0, 4))
+  return { ...blankForm(), ...item, date: `${year}-${pad(item.month)}-${pad(item.day)}`, notes: item.notes || '', relation: item.relation || '', auto_date: Boolean(item.auto_date) }
 }
 
 export function OccasionsScreen({ user, phone, onBack, onShop, onSignIn, TopBar, Icon, data }) {
@@ -89,21 +108,21 @@ export function OccasionsScreen({ user, phone, onBack, onShop, onSignIn, TopBar,
   async function save() {
     setError('')
     const holiday = HOLIDAY_KINDS.has(form.kind)
-    const rule = holiday ? holidayDate(form.kind, new Date().getFullYear()) : null
-    const month = rule ? rule.month : Number(form.month)
-    const day = rule ? rule.day : Number(form.day)
     if (!holiday && !form.person.trim()) { setError('Add who it’s for, e.g. “Mom” or “Ava”.'); return }
-    if (!month || !day) { setError('Pick the month and day.'); return }
-    if (!form.repeats && !form.year) { setError('Add the year for a one-time date.'); return }
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(form.date)) { setError('Pick the date.'); return }
+    const [y, month, day] = form.date.split('-').map(Number)
+    const thisYear = Number(vanDate().slice(0, 4))
+    // For yearly dates, only keep a past year (birth year, wedding year) so we can show ages.
+    const year = form.repeats ? (y < thisYear ? y : null) : y
     setBusy(true)
     const row = {
       customer_id: user.id,
       person: form.person.trim() || KIND_LABEL[form.kind],
       relation: form.relation || null,
       kind: form.kind,
-      month, day,
-      year: form.year ? Number(form.year) : null,
+      month, day, year,
       repeats: form.repeats,
+      auto_date: Boolean(form.auto_date && officialDate(form.kind) === form.date),
       remind_days: form.remind_days.length ? [...form.remind_days].sort((a, b) => b - a) : [14, 3],
       notes: form.notes.trim() || null,
     }
@@ -123,19 +142,14 @@ export function OccasionsScreen({ user, phone, onBack, onShop, onSignIn, TopBar,
     reload()
   }
 
-  async function quickAdd(kind) {
-    const rule = holidayDate(kind, new Date().getFullYear())
-    const { error: err } = await supabase.from('occasions').insert({ customer_id: user.id, person: KIND_LABEL[kind], kind, month: rule.month, day: rule.day, repeats: true, remind_days: [14, 3] })
-    if (err) { setError(friendlyError(err)); return }
-    if (!profile) await saveProfile()
-    reload()
+  function quickAdd(kind) {
+    setForm({ ...blankForm(), kind, date: officialDate(kind), auto_date: true })
   }
 
   if (form) {
     const holiday = HOLIDAY_KINDS.has(form.kind)
-    const auto = holiday && !MOVING_HOLIDAYS.has(form.kind)
-    const days = Array.from({ length: 31 }, (_, i) => i + 1)
-    const thisYear = new Date().getFullYear()
+    const official = holiday ? officialDate(form.kind) : ''
+    const birthday = ['birthday', 'first_birthday', 'pet_birthday', 'anniversary', 'work_anniversary'].includes(form.kind)
     return (
       <div className="ca-screen">
         <TopBar title={form.id ? 'Edit occasion' : 'Add an occasion'} onBack={() => { setForm(null); setError('') }} />
@@ -144,7 +158,8 @@ export function OccasionsScreen({ user, phone, onBack, onShop, onSignIn, TopBar,
             <label className="ca-label" htmlFor="oc-kind">What is it?</label>
             <select id="oc-kind" className="ca-select" value={form.kind} onChange={(e) => {
               const kind = e.target.value
-              set({ kind, repeats: !(MOVING_HOLIDAYS.has(kind) || ['wedding', 'due_date', 'baby_shower', 'bridal_shower', 'engagement', 'graduation', 'retirement', 'housewarming', 'trophy', 'tournament', 'recital', 'launch', 'fundraiser', 'farewell', 'bachelor', 'gender_reveal', 'baptism', 'first_communion', 'confirmation', 'sweet_16', 'quinceanera', 'bar_mitzvah', 'citizenship', 'new_job', 'class_party', 'team_party', 'office_party', 'family_reunion', 'first_birthday'].includes(kind)) })
+              const next = officialDate(kind)
+              set({ kind, ...(next && (!form.date || form.auto_date) ? { date: next, auto_date: true } : {}), repeats: !(MOVING_HOLIDAYS.has(kind) || ['wedding', 'due_date', 'baby_shower', 'bridal_shower', 'engagement', 'graduation', 'retirement', 'housewarming', 'trophy', 'tournament', 'recital', 'launch', 'fundraiser', 'farewell', 'bachelor', 'gender_reveal', 'baptism', 'first_communion', 'confirmation', 'sweet_16', 'quinceanera', 'bar_mitzvah', 'citizenship', 'new_job', 'class_party', 'team_party', 'office_party', 'family_reunion', 'first_birthday'].includes(kind)) })
             }}>
               {OCCASION_GROUPS.map((group) => (
                 <optgroup key={group.title} label={group.title}>
@@ -164,29 +179,21 @@ export function OccasionsScreen({ user, phone, onBack, onShop, onSignIn, TopBar,
             </div>
           </section>
 
-          {auto ? (
-            <p className="ca-muted ca-small">We’ll use the right date every year automatically.</p>
-          ) : (
-            <section className="ca-stack-8">
-              <span className="ca-label">Date</span>
-              <div className="ca-grid-3">
-                <select className="ca-select" aria-label="Month" value={form.month} onChange={(e) => set({ month: e.target.value })}>
-                  <option value="">Month</option>
-                  {MONTHS.map((name, i) => <option key={name} value={i + 1}>{name.slice(0, 3)}</option>)}
-                </select>
-                <select className="ca-select" aria-label="Day" value={form.day} onChange={(e) => set({ day: e.target.value })}>
-                  <option value="">Day</option>
-                  {days.map((d) => <option key={d} value={d}>{d}</option>)}
-                </select>
-                <input className="ca-input" aria-label="Year" inputMode="numeric" placeholder={form.repeats ? 'Year (opt.)' : 'Year'} value={form.year} onChange={(e) => set({ year: e.target.value.replace(/\D/g, '').slice(0, 4) })} />
-              </div>
-              <span className="ca-muted ca-small">{form.kind.includes('birthday') ? 'Add the birth year and we’ll tell you the age they’re turning.' : form.repeats ? '' : `For a one-time date, e.g. ${thisYear + 1}.`}</span>
-              <div className="ca-setting-row">
-                <span className="ca-list-text"><strong>Every year</strong><span className="ca-muted ca-small">Turn off for one-time dates like a wedding or due date</span></span>
-                <button type="button" role="switch" aria-checked={form.repeats} aria-label="Every year" className={`ca-switch ${form.repeats ? 'is-on' : ''}`} onClick={() => set({ repeats: !form.repeats })}><span /></button>
-              </div>
-            </section>
-          )}
+          <section className="ca-stack-8">
+            <label className="ca-label" htmlFor="oc-date">{birthday && form.repeats ? 'Date (add the real year to see their age)' : 'Date'}</label>
+            <input id="oc-date" className="ca-input ca-date-input" type="date" value={form.date} onChange={(e) => set({ date: e.target.value, auto_date: Boolean(official) && e.target.value === official })} />
+            {official ? (
+              <span className="ca-muted ca-small">
+                {form.date === official
+                  ? `${KIND_LABEL[form.kind]} is on a different date each year. We’ll follow the official date for you.`
+                  : <>Official date: {dateLabel(official, true)}. <button type="button" className="ca-link" onClick={() => set({ date: official, auto_date: true })}>Use it</button></>}
+              </span>
+            ) : MOVING_HOLIDAYS.has(form.kind) ? <span className="ca-muted ca-small">This holiday moves each year, so pick this year’s date.</span> : null}
+            <div className="ca-setting-row">
+              <span className="ca-list-text"><strong>Every year</strong><span className="ca-muted ca-small">Turn off for one-time dates like a wedding or due date</span></span>
+              <button type="button" role="switch" aria-checked={form.repeats} aria-label="Every year" className={`ca-switch ${form.repeats ? 'is-on' : ''}`} onClick={() => set({ repeats: !form.repeats })}><span /></button>
+            </div>
+          </section>
 
           <section className="ca-stack-8">
             <span className="ca-label">Remind me</span>
@@ -242,7 +249,7 @@ export function OccasionsScreen({ user, phone, onBack, onShop, onSignIn, TopBar,
             const age = turningAge(item, item.next)
             return (
               <div key={item.id} className={`ca-occasion ${item.days <= 14 ? 'is-soon' : ''}`}>
-                <button type="button" className="ca-occasion-main" onClick={() => setForm({ ...blankForm(), ...item, month: String(item.month), day: String(item.day), year: item.year ? String(item.year) : '', notes: item.notes || '', relation: item.relation || '' })}>
+                <button type="button" className="ca-occasion-main" onClick={() => setForm(formFor(item))}>
                   <span className="ca-occasion-date"><strong>{Number(item.next.slice(8))}</strong><span>{MONTHS[Number(item.next.slice(5, 7)) - 1].slice(0, 3)}</span></span>
                   <span className="ca-list-text">
                     <strong>{occasionTitle(item)}{age ? ` · turning ${age}` : ''}</strong>

@@ -287,3 +287,4 @@
 .ca-occasion-date strong { font-size: 18px; }
 .ca-occasion-date span { font-size: 11px; font-weight: 700; color: var(--accent-dark); text-transform: uppercase; }
 .ca-grid-3 { display: grid; gap: 8px; grid-template-columns: repeat(3, minmax(0, 1fr)); }
+.ca-date-input { appearance: none; -webkit-appearance: none; display: block; }

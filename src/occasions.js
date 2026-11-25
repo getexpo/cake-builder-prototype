@@ -96,7 +96,7 @@ export function nextDate(occasion, today = vanDate()) {
     return date >= today ? date : null
   }
   for (const year of [thisYear, thisYear + 1]) {
-    const rule = HOLIDAY_KINDS.has(occasion.kind) ? holidayDate(occasion.kind, year) : null
+    const rule = occasion.auto_date ? holidayDate(occasion.kind, year) : null
     const date = rule ? iso(year, rule.month, rule.day) : iso(year, occasion.month, occasion.day)
     if (date >= today) return date
   }
