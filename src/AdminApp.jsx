@@ -2,6 +2,7 @@ import { Fragment, useCallback, useEffect, useState } from 'react'
 import { CATEGORIES } from './catalog.js'
 import { documentUrl, friendlyError, supabase } from './supabaseClient.js'
 import { Badge, Loading, Notice, Shell, SignInScreen, money, useSession, when } from './partnerShared.jsx'
+import { ChatThread, ConversationList, useConversations } from './widgets.jsx'
 
 const TITLE = 'Admin'
 
@@ -49,11 +50,14 @@ function AdminHome({ user }) {
 
   const pendingDrivers = drivers.filter((item) => item.status === 'pending').length
   const pendingBakeries = bakeries.filter((item) => item.status === 'pending').length
+  const [allChats, reloadChats] = useConversations({})
+  const adminUnread = allChats.filter((chat) => !chat.bakery_id.startsWith('bk-')).reduce((sum, chat) => sum + (chat.bakery_unread || 0), 0)
   const openOrders = orders.filter((item) => !['delivered', 'picked_up', 'cancelled'].includes(item.status)).length
   const tabs = [
     { id: 'drivers', label: 'Drivers', count: pendingDrivers },
     { id: 'bakeries', label: 'Bakeries', count: pendingBakeries },
     { id: 'orders', label: 'Orders', count: openOrders },
+    { id: 'messages', label: 'Messages', count: adminUnread },
   ]
 
   return (
@@ -62,6 +66,7 @@ function AdminHome({ user }) {
       {tab === 'drivers' ? <Applications kind="driver" rows={drivers} onChanged={load} /> : null}
       {tab === 'bakeries' ? <Applications kind="bakery" rows={bakeries} shops={shops} onChanged={load} /> : null}
       {tab === 'orders' ? <Orders orders={orders} onChanged={load} /> : null}
+      {tab === 'messages' ? <AdminMessages conversations={allChats} reload={reloadChats} /> : null}
     </Shell>
   )
 }
@@ -190,6 +195,19 @@ function Orders({ orders, onChanged }) {
           </div>
         ))}
       </div>
+    </div>
+  )
+}
+
+function AdminMessages({ conversations, reload }) {
+  const [open, setOpen] = useState(null)
+  if (open) {
+    return <ChatThread conversationId={open.id} side="bakery" title={`${open.customer_name || 'Customer'} → ${open.bakery_name}`} subtitle="You're replying as the shop" onBack={() => { setOpen(null); reload() }} placeholder={`Reply as ${open.bakery_name}`} />
+  }
+  return (
+    <div className="pt-stack">
+      <p className="pt-muted">Every customer chat. Demo shops have no owner, so answer their customers here. Your replies show as the shop.</p>
+      <ConversationList conversations={conversations} side="admin" onOpen={setOpen} empty="No messages yet." />
     </div>
   )
 }

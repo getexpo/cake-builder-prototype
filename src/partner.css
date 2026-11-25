@@ -98,7 +98,7 @@ textarea.pt-input { min-height: 72px; resize: vertical; }
 .pt-filters button { min-height: 40px; padding: 0 14px; border-radius: 999px; border: 1px solid var(--line); background: #FFFFFF; font-weight: 600; font-size: 14px; }
 .pt-filters button.is-active { background: var(--ink); border-color: var(--ink); color: #FFFFFF !important; }
 
-.pt-menu-row { display: grid; grid-template-columns: 1.2fr 2fr 90px auto; gap: 8px; align-items: center; }
+.pt-menu-row { display: grid; grid-template-columns: 1.2fr 2fr 90px 170px auto; gap: 8px; align-items: center; }
 .pt-price { text-align: right; }
 
 .pt-table { display: flex; flex-direction: column; background: #FFFFFF; border: 1px solid var(--line); border-radius: 18px; overflow: hidden; }
@@ -109,5 +109,15 @@ textarea.pt-input { min-height: 72px; resize: vertical; }
   .pt-tr { grid-template-columns: 1fr 1fr; }
   .pt-menu-row { grid-template-columns: 1fr 90px; }
   .pt-menu-row input:nth-child(2) { grid-column: 1 / -1; grid-row: 2; }
+  .pt-menu-row select { grid-row: 3; }
   .pt-grid-2 { grid-template-columns: 1fr; }
 }
+
+/* calendar + settings additions */
+.pt-cal-layout { display: grid; gap: 16px; grid-template-columns: minmax(0, 1fr); }
+@media (min-width: 900px) { .pt-cal-layout { grid-template-columns: minmax(0, 1.1fr) minmax(0, 1fr); align-items: start; } }
+.pt-cal-order { display: flex; flex-direction: column; gap: 4px; padding: 12px; border: 1px solid var(--line); border-radius: 14px; }
+.pt-plain-row { width: 100%; min-height: 44px; border: 0; border-bottom: 1px solid var(--line); background: none; padding: 0; text-align: left; }
+.pt-row-start { justify-content: flex-start; gap: 8px; }
+.pt-time { max-width: 160px; }
+.pt-menu-row select { min-width: 0; }

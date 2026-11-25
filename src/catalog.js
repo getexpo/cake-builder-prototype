@@ -45,10 +45,11 @@ export const SHOPS = [
     leadHours: 24,
     tint: '#F3E8E2',
     icon: 'cake',
-    builder: { kind: 'cake', noun: 'cake', maxLayers: 6, shapes: ['round', 'heart', 'tall'], flavours: CLASSIC_FLAVOURS },
+    closedDays: [1], // closed Mondays
+    builder: { kind: 'cake', noun: 'cake', maxLayers: 6, shapes: ['round', 'heart', 'tall'], flavours: CLASSIC_FLAVOURS, leadHours: 72 },
     menu: [
       { id: 'mc-1', title: 'Vanilla Birthday Bloom', detail: '6" vanilla sponge, buttercream florals', price: 58 },
-      { id: 'mc-2', title: 'Chocolate Celebration Stack', detail: 'Three layers of chocolate sponge with ganache', price: 72 },
+      { id: 'mc-2', title: 'Chocolate Celebration Stack', detail: 'Three layers of chocolate sponge with ganache', price: 72, leadHours: 48 },
       { id: 'mc-3', title: 'Funfetti Party Cake', detail: 'Sprinkle sponge, vanilla buttercream, rainbow sprinkles', price: 64 },
     ],
   },

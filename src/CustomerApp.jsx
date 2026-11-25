@@ -1,6 +1,8 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { CATEGORIES, SHOPS } from './catalog.js'
 import { friendlyError, supabase } from './supabaseClient.js'
+import { STATUS_HINT, addDays, dateLabel, dayStatus, earliestDay, leadFor, noticeLabel, timeLabel, timesOn, vanDate, vanMoment } from './schedule.js'
+import { ChatThread, ConversationList, MonthCalendar, useConversations } from './widgets.jsx'
 import './customer.css'
 
 // Customer-facing app (redesign). All data and actions come from App via `ctx`,
@@ -60,7 +62,6 @@ const DELIVERY_STEPS = [
 const STATUS_TEXT = { new: 'Waiting for the bakery', confirmed: 'Confirmed', baking: 'Baking', ready: 'Ready', out_for_delivery: 'On the way', picked_up: 'Picked up', delivered: 'Delivered', cancelled: 'Cancelled' }
 
 const DETAILS_KEY = 'cake-customer-details'
-const SLOT_HOURS = [10, 13, 16]
 const DELIVERY_FEE = 7.99
 const SERVICE_FEE = 2.49
 const DRIVER_PAY = 8
@@ -78,35 +79,26 @@ function timeText(date) {
   return date.toLocaleTimeString('en-CA', { hour: 'numeric', minute: '2-digit' }).replace(':00', '').replace(/\./g, '')
 }
 
-// Pickup/ready windows: 10 AM, 1 PM and 4 PM, starting after the shop's notice period.
-function slotsFor(shop, count = 6) {
-  const earliest = Date.now() + (shop?.leadHours || 24) * 3600 * 1000
-  const day = new Date()
-  day.setHours(0, 0, 0, 0)
-  const out = []
-  for (let offset = 0; offset < 60 && out.length < count; offset += 1) {
-    for (const hour of SLOT_HOURS) {
-      const start = new Date(day)
-      start.setDate(day.getDate() + offset)
-      start.setHours(hour, 0, 0, 0)
-      if (start.getTime() >= earliest && out.length < count) out.push({ id: start.toISOString(), start, end: new Date(start.getTime() + 3600 * 1000) })
-    }
-  }
-  return out
+function windowLabel(day, time) {
+  const [hh, mm] = time.split(':').map(Number)
+  const endTime = `${String(hh + 1).padStart(2, '0')}:${String(mm).padStart(2, '0')}`
+  return `${dateLabel(day)} · ${timeLabel(time)}–${timeLabel(endTime)}`
 }
 
-function slotLabel(slot) {
-  if (!slot) return ''
-  const start = new Date(slot.start)
-  return `${start.toLocaleDateString('en-CA', { weekday: 'short', month: 'short', day: 'numeric' })} · ${timeText(start)}–${timeText(new Date(slot.end))}`
+// Earliest day anything on this shop's menu can be ready.
+function shopEarliest(shop) {
+  const leads = [Number(shop?.builder?.leadHours) || 0, ...(shop?.menu || []).map((item) => Number(item.leadHours) || 0)].filter(Boolean)
+  const lead = Math.min(Number(shop?.leadHours) || 24, ...(leads.length ? leads : [Infinity]))
+  return earliestDay(shop, lead)
 }
 
 function liveShopFromRow(row) {
   return {
     id: row.id, name: row.name, area: row.area, address: row.address, category: row.category,
     tagline: row.tagline || 'New on the app', leadHours: row.lead_hours || 24, tint: row.tint || '#F3E8E2', icon: row.icon || 'cake',
+    closedDays: row.closed_days || [], blockedDates: row.blocked_dates || [], dailyCapacity: row.daily_capacity || null, pickupTimes: row.pickup_times || null,
     builder: row.builder && Object.keys(row.builder).length ? row.builder : SHOPS[0].builder,
-    menu: (row.menu || []).map((item) => ({ ...item, price: Number(item.price) || 0 })), live: true,
+    menu: (row.menu || []).map((item) => ({ ...item, price: Number(item.price) || 0, leadHours: Number(item.leadHours) || 0 })), live: true,
   }
 }
 
@@ -283,6 +275,8 @@ function Icon({ name, size = 22 }) {
     heart: <path d="M12 20s-7-4.5-7-10a4 4 0 0 1 7-2.6A4 4 0 0 1 19 10c0 5.5-7 10-7 10z" />,
     check: <path d="m5 12 5 5 9-10" />,
     plus: <path d="M12 5v14M5 12h14" />,
+    chat: <path d="M4 5h16v11H9l-5 4z" />,
+    calendar: <><rect x="3" y="5" width="18" height="16" rx="2" /><path d="M3 10h18M8 3v4M16 3v4" /></>,
     store: <><path d="M4 10h16l-1-5H5z" /><path d="M5 10v10h14V10" /><path d="M10 20v-5h4v5" /></>,
   }
   return (
@@ -354,7 +348,7 @@ function Segmented({ value, options, onChange, label }) {
   )
 }
 
-function BottomNav({ view, go, cartCount }) {
+function BottomNav({ view, go, cartCount, unread }) {
   const tabs = [
     { id: 'home', label: 'Home', icon: 'home' },
     { id: 'search', label: 'Search', icon: 'search' },
@@ -373,7 +367,7 @@ function BottomNav({ view, go, cartCount }) {
         >
           <span className="ca-nav-icon">
             <Icon name={tab.icon} size={24} />
-            {tab.id === 'orders' && cartCount ? <span className="ca-badge">{cartCount}</span> : null}
+            {tab.id === 'orders' && (cartCount || unread) ? <span className="ca-badge">{cartCount || unread}</span> : null}
           </span>
           {tab.label}
         </button>
@@ -402,8 +396,7 @@ export default function CustomerApp({ ctx }) {
   const [sbUser, setSbUser] = useState(null)
   const [myOrders, setMyOrders] = useState([])
   const [details, setDetails] = useState(readDetails)
-  const [checkout, setCheckout] = useState({ slotId: '', addressId: '', line1: '', city: 'Vancouver', instructions: '', phone: '', tip: 4, notes: '', cardId: '', cardName: '', cardLast4: '', placing: false, error: '' })
-  const [placedId, setPlacedId] = useState('')
+  const [checkout, setCheckout] = useState({ times: {}, addressId: '', line1: '', city: 'Vancouver', instructions: '', phone: '', tip: 4, notes: '', cardId: '', cardName: '', cardLast4: '', placing: false, error: '' })
   const [build, setBuild] = useState(() => newBuild(SHOPS.find((item) => item.id === customerShopId) || SHOPS[0]))
   const [custom, setCustom] = useState(() => newCustom(SHOPS.find((item) => item.id === customerShopId) || SHOPS[0]))
   const [category, setCategory] = useState('all')
@@ -412,6 +405,11 @@ export default function CustomerApp({ ctx }) {
   const [accountPage, setAccountPage] = useState('main')
   const [settings, setSettings] = useState(readSettings)
   const [openOrderId, setOpenOrderId] = useState('')
+  const [placedIds, setPlacedIds] = useState([])
+  const [dateOpenFor, setDateOpenFor] = useState(null)
+  const [dayLoad, setDayLoad] = useState({})
+  const [chat, setChat] = useState(null)
+  const [chatReturn, setChatReturn] = useState('home')
 
   const bakery = bakeries.find((item) => item.id === customerShopId) || bakeries[0]
   const cartCount = cart.reduce((sum, item) => sum + (item.quantity || 1), 0)
@@ -425,6 +423,34 @@ export default function CustomerApp({ ctx }) {
   }, [cart, ctx.fulfillmentType, checkout.tip])
 
   const signedIn = Boolean(sbUser)
+  const cartShop = cart.length ? bakeries.find((item) => item.id === cart[0].shopId) : null
+  const [conversations, loadConversations] = useConversations(sbUser ? { customerId: sbUser.id } : null, Boolean(sbUser))
+  const unreadMessages = conversations.reduce((sum, item) => sum + (item.customer_unread || 0), 0)
+
+  useEffect(() => {
+    if (new URLSearchParams(window.location.search).get('view') === 'messages') setView('messages')
+  }, [setView])
+
+  // How booked each day is, so full days are greyed out.
+  useEffect(() => {
+    if (!cartShop?.live || !cartShop.dailyCapacity) { setDayLoad({}); return }
+    const from = vanDate()
+    supabase.rpc('bakery_day_load', { p_bakery: cartShop.id, p_from: from, p_to: addDays(from, 180) })
+      .then(({ data }) => setDayLoad(Object.fromEntries((data || []).map((row) => [row.day, row.orders]))))
+  }, [cartShop?.id, cartShop?.live, cartShop?.dailyCapacity])
+
+  // Each cart item keeps its own date; fix any date that is no longer possible.
+  useEffect(() => {
+    if (!cart.length || !cartShop) return
+    let changed = false
+    const next = cart.map((item) => {
+      const lead = leadFor(item, cartShop)
+      if (item.date && dayStatus(item.date, cartShop, lead, dayLoad) === 'ok') return item
+      changed = true
+      return { ...item, date: earliestDay(cartShop, lead, dayLoad) }
+    })
+    if (changed) setCart(next)
+  }, [cart, cartShop, dayLoad, setCart])
 
   useEffect(() => {
     if (!supabase) return undefined
@@ -442,10 +468,10 @@ export default function CustomerApp({ ctx }) {
 
   useEffect(() => {
     loadOrders()
-    if (!sbUser || !(view === 'orders' || placedId)) return undefined
+    if (!sbUser || !(view === 'orders' || placedIds.length)) return undefined
     const timer = setInterval(loadOrders, 15000)
     return () => clearInterval(timer)
-  }, [loadOrders, sbUser, view, placedId])
+  }, [loadOrders, sbUser, view, placedIds.length])
 
   function saveDetails(next) {
     setDetails(next)
@@ -478,13 +504,16 @@ export default function CustomerApp({ ctx }) {
       setPendingItem(item)
       return
     }
-    setCart((current) => [...current, item])
+    const shop = bakeries.find((entry) => entry.id === item.shopId) || bakery
+    const dated = { ...item, date: item.date || earliestDay(shop, leadFor(item, shop), dayLoad) }
+    setCart((current) => [...current, dated])
     setUiState((current) => ({ ...current, error: '', message: `${item.title} added to your cart.` }))
     go('checkout')
   }
 
   function confirmNewCart() {
-    setCart([pendingItem])
+    const shop = bakeries.find((entry) => entry.id === pendingItem.shopId) || bakery
+    setCart([{ ...pendingItem, date: earliestDay(shop, leadFor(pendingItem, shop)) }])
     setPendingItem(null)
     go('checkout')
   }
@@ -495,6 +524,16 @@ export default function CustomerApp({ ctx }) {
       try { window.localStorage.setItem(SETTINGS_KEY, JSON.stringify(next)) } catch { /* storage unavailable */ }
       return next
     })
+  }
+
+  async function openChat(shop, fromView) {
+    if (!signedIn) { ctx.openCustomerSignIn(); return }
+    const { data, error } = await supabase.rpc('start_conversation', { p_bakery_id: shop.id, p_bakery_name: shop.name, p_phone: details.phone || null })
+    if (error) { setUiState((current) => ({ ...current, error: friendlyError(error) })); return }
+    setChat({ id: data, bakery_name: shop.name })
+    setChatReturn(fromView || view)
+    go('messages')
+    loadConversations()
   }
 
   /* ----- screens ----- */
@@ -511,7 +550,7 @@ export default function CustomerApp({ ctx }) {
   }
 
   function renderBakeryCard(item) {
-    const slot = slotsFor(item, 1)[0]
+    const first = shopEarliest(item)
     return (
       <button key={item.id} type="button" className="ca-store-card" onClick={() => openBakery(item.id)}>
         <Photo tint={item.tint} icon={item.icon} size={44} className="ca-store-photo" />
@@ -522,7 +561,7 @@ export default function CustomerApp({ ctx }) {
             <span className="ca-chips">
               <span className="ca-chip is-accent">{builderTitle(item)}</span>
               {item.live ? <span className="ca-chip is-accent">New</span> : null}
-              <span className="ca-chip">{slot ? `Earliest: ${slotLabel(slot).split(' · ')[0]}` : leadLabel(item.leadHours)}</span>
+              <span className="ca-chip">{first ? `Earliest: ${dateLabel(first)}` : leadLabel(item.leadHours)}</span>
             </span>
           </span>
         </span>
@@ -603,8 +642,9 @@ export default function CustomerApp({ ctx }) {
 
   function renderBakery() {
     const items = bakery.menu
-    const slot = slotsFor(bakery, 1)[0]
+    const first = shopEarliest(bakery)
     const limit = layerLimitFor(bakery)
+    const builderLead = Number(bakery.builder?.leadHours) || 0
     return (
       <div className="ca-screen">
         <div className="ca-banner">
@@ -619,8 +659,9 @@ export default function CustomerApp({ ctx }) {
           <div className="ca-facts">
             <div><strong>{bakery.area}</strong><span>Location</span></div>
             <div><strong>{leadLabel(bakery.leadHours).replace('Order ', '')}</strong><span>Order ahead</span></div>
-            <div><strong>{slot ? slotLabel(slot).split(' · ')[0] : 'Soon'}</strong><span>Earliest</span></div>
+            <div><strong>{first ? dateLabel(first) : 'Soon'}</strong><span>Earliest</span></div>
           </div>
+          <button type="button" className="ca-btn ca-btn-ghost" onClick={() => openChat(bakery, 'bakery')}><Icon name="chat" size={18} />Message {bakery.name}</button>
         </div>
         <div className="ca-pad ca-section">
           <h2 className="ca-h2">Menu</h2>
@@ -628,7 +669,7 @@ export default function CustomerApp({ ctx }) {
             <span className="ca-menu-text">
               <span className="ca-menu-title">{builderTitle(bakery)}</span>
               <span className="ca-muted">{limit ? `Choose the shape, sponge, up to ${limit} layers, fillings and toppings` : `Choose ${(bakery.builder.groups || []).slice(0, 4).map((group) => group.title.toLowerCase()).join(', ')} and more`}</span>
-              <span className="ca-menu-price">From {money(customFromPrice(bakery))}</span>
+              <span className="ca-menu-price">From {money(customFromPrice(bakery))}{builderLead && builderLead !== bakery.leadHours ? <span className="ca-muted ca-small"> · {noticeLabel(builderLead)}</span> : null}</span>
             </span>
             <span className="ca-menu-thumb is-accent"><Icon name={bakery.icon} size={32} /><span className="ca-plus" aria-hidden="true"><Icon name="plus" size={16} /></span></span>
           </button>
@@ -637,7 +678,7 @@ export default function CustomerApp({ ctx }) {
               <span className="ca-menu-text">
                 <span className="ca-menu-title">{item.title}</span>
                 <span className="ca-muted">{item.detail}</span>
-                <span className="ca-menu-price">{money(item.price)}</span>
+                <span className="ca-menu-price">{money(item.price)}{item.leadHours && item.leadHours !== bakery.leadHours ? <span className="ca-muted ca-small"> · {noticeLabel(item.leadHours)}</span> : null}</span>
               </span>
               <span className="ca-menu-thumb" style={{ background: bakery.tint }}><Icon name={bakery.icon} size={30} /><span className="ca-plus" aria-hidden="true"><Icon name="plus" size={16} /></span></span>
             </button>
@@ -1004,10 +1045,31 @@ export default function CustomerApp({ ctx }) {
     )
   }
 
+  function renderPlaced(orders) {
+    return (
+      <div className="ca-screen">
+        <TopBar title="Orders placed" onBack={() => { setPlacedIds([]); go('home') }} />
+        <div className="ca-pad ca-stack-12 ca-pt-16">
+          <h1 className="ca-h1">{orders.length} orders placed!</h1>
+          <p className="ca-muted ca-lh">Your cakes are on different dates, so each date is its own order. We'll text you as each one is confirmed.</p>
+          {orders.map((order) => (
+            <button key={order.id} type="button" className="ca-list-row" onClick={() => { setPlacedIds([]); setOpenOrderId(order.id); go('orders') }}>
+              <span className="ca-list-icon"><Icon name="clock" /></span>
+              <span className="ca-list-text"><strong>{order.ready_window}</strong><span className="ca-muted">{(order.items || []).map((item) => item.title).join(', ')} · {money(order.total)}</span></span>
+              <Icon name="chevron" size={18} />
+            </button>
+          ))}
+          <button type="button" className="ca-btn ca-btn-ghost" onClick={() => { setPlacedIds([]); go('home') }}>Back to home</button>
+        </div>
+      </div>
+    )
+  }
+
   function renderCheckout() {
-    if (placedId) {
-      const placed = myOrders.find((order) => order.id === placedId)
-      if (placed) return renderOrderDetail(placed, () => { setPlacedId(''); go('home') }, true)
+    if (placedIds.length) {
+      const placed = myOrders.filter((order) => placedIds.includes(order.id))
+      if (placed.length === 1) return renderOrderDetail(placed[0], () => { setPlacedIds([]); go('home') }, true)
+      if (placed.length > 1) return renderPlaced(placed)
     }
     if (!cart.length) {
       return (
@@ -1022,72 +1084,102 @@ export default function CustomerApp({ ctx }) {
         </div>
       )
     }
-    const shop = bakeries.find((item) => item.id === cart[0].shopId) || bakery
+    const shop = cartShop || bakery
     const delivery = ctx.fulfillmentType === 'delivery'
-    const slots = slotsFor(shop, 6)
-    const slot = slots.find((item) => item.id === checkout.slotId) || slots[0]
     const setC = (patch) => setCheckout((current) => ({ ...current, ...patch, error: '' }))
     const savedAddress = details.addresses.find((item) => item.id === checkout.addressId)
     const address = savedAddress || { line1: checkout.line1.trim(), city: checkout.city, instructions: checkout.instructions.trim() }
     const savedCard = details.cards.find((item) => item.id === checkout.cardId)
     const card = savedCard || { name: checkout.cardName.trim(), last4: checkout.cardLast4 }
     const phone = (checkout.phone || details.phone || '').trim()
-    const blocker = !signedIn ? '' : !slot ? 'No times available' : delivery && !address.line1 ? 'Add a delivery address' : !phone ? 'Add a phone number' : card.last4.length !== 4 ? 'Add a card' : ''
+    const tipEach = delivery ? Number(checkout.tip) || 0 : 0
+
+    // One order per date.
+    const groups = [...new Set(cart.map((item) => item.date || ''))].sort().map((date) => {
+      const items = cart.filter((item) => (item.date || '') === date)
+      const lead = Math.max(...items.map((item) => leadFor(item, shop)))
+      const times = date ? timesOn(date, shop, lead) : []
+      const time = times.includes(checkout.times[date]) ? checkout.times[date] : times[0]
+      const subtotal = items.reduce((sum, item) => sum + (item.unitPrice ?? item.totalPrice ?? 0) * (item.quantity || 1), 0)
+      const deliveryFee = delivery ? DELIVERY_FEE : 0
+      const tax = Math.round((subtotal + deliveryFee + SERVICE_FEE) * 0.05 * 100) / 100
+      const total = Math.round((subtotal + deliveryFee + SERVICE_FEE + tax + tipEach) * 100) / 100
+      return { date, items, times, time, subtotal, deliveryFee, service: SERVICE_FEE, tax, tip: tipEach, total }
+    })
+    const sum = (key) => Math.round(groups.reduce((acc, group) => acc + group[key], 0) * 100) / 100
+    const many = groups.length > 1
+    const timesMissing = groups.some((group) => !group.date || !group.time)
+    const blocker = !signedIn ? '' : timesMissing ? 'Pick a date and time for every item' : delivery && !address.line1 ? 'Add a delivery address' : !phone ? 'Add a phone number' : card.last4.length !== 4 ? 'Add a card' : ''
+
+    function setItemDate(itemId, date) {
+      setCart(cart.map((item) => (item.id === itemId ? { ...item, date } : item)))
+      setDateOpenFor(null)
+    }
 
     async function placeOrder() {
       if (blocker) { setC({ error: blocker }); return }
       setCheckout((current) => ({ ...current, placing: true, error: '' }))
-      const items = cart.map((item) => ({
-        title: item.title,
-        summary: item.summary || item.config?.summary || '',
-        quantity: item.quantity || 1,
-        unitPrice: item.unitPrice ?? item.totalPrice,
-        totalPrice: (item.unitPrice ?? item.totalPrice) * (item.quantity || 1),
-        config: item.config || null,
-      }))
-      const row = {
-        customer_id: sbUser.id,
-        customer_name: sbUser.user_metadata?.full_name || sbUser.email,
-        customer_email: sbUser.email,
-        customer_phone: phone,
-        bakery_id: shop.id,
-        bakery_name: shop.name,
-        bakery_area: shop.area,
-        bakery_address: shop.address || null,
-        items,
-        subtotal: cartTotals.subtotal,
-        delivery_fee: cartTotals.delivery,
-        service_fee: cartTotals.service,
-        tax: cartTotals.tax,
-        tip: cartTotals.tip,
-        total: cartTotals.total,
-        fulfillment: delivery ? 'delivery' : 'pickup',
-        ready_at: new Date(slot.start).toISOString(),
-        ready_window: slotLabel(slot),
-        dropoff: delivery ? address : null,
-        notes: checkout.notes.trim() || null,
-        payment: { mode: 'test', last4: card.last4, name: card.name },
-        driver_pay: delivery ? DRIVER_PAY : 0,
-      }
-      const { data, error } = await supabase.from('orders').insert(row).select().single()
-      if (error) {
-        setCheckout((current) => ({ ...current, placing: false, error: friendlyError(error) }))
-        return
+      const placed = []
+      for (const group of groups) {
+        const items = group.items.map((item) => ({
+          title: item.title,
+          summary: item.summary || item.config?.summary || '',
+          quantity: item.quantity || 1,
+          unitPrice: item.unitPrice ?? item.totalPrice,
+          totalPrice: (item.unitPrice ?? item.totalPrice) * (item.quantity || 1),
+          config: item.config || null,
+        }))
+        const row = {
+          customer_id: sbUser.id,
+          customer_name: sbUser.user_metadata?.full_name || sbUser.email,
+          customer_email: sbUser.email,
+          customer_phone: phone,
+          bakery_id: shop.id,
+          bakery_name: shop.name,
+          bakery_area: shop.area,
+          bakery_address: shop.address || null,
+          items,
+          subtotal: group.subtotal,
+          delivery_fee: group.deliveryFee,
+          service_fee: group.service,
+          tax: group.tax,
+          tip: group.tip,
+          total: group.total,
+          fulfillment: delivery ? 'delivery' : 'pickup',
+          ready_at: vanMoment(group.date, group.time).toISOString(),
+          ready_window: windowLabel(group.date, group.time),
+          dropoff: delivery ? address : null,
+          notes: checkout.notes.trim() || null,
+          payment: { mode: 'test', last4: card.last4, name: card.name },
+          driver_pay: delivery ? DRIVER_PAY : 0,
+        }
+        const { data, error } = await supabase.from('orders').insert(row).select().single()
+        if (error) {
+          // Keep what was placed; leave the rest in the cart.
+          if (placed.length) {
+            const done = new Set(placed.map((order) => order.dateKey))
+            setCart(cart.filter((item) => !done.has(item.date || '')))
+            setMyOrders((current) => [...placed, ...current])
+          }
+          setCheckout((current) => ({ ...current, placing: false, error: `${placed.length ? `${placed.length} order${placed.length === 1 ? '' : 's'} placed. ` : ''}${dateLabel(group.date)}: ${friendlyError(error)}` }))
+          return
+        }
+        placed.push({ ...data, dateKey: group.date })
       }
       const next = { ...details, phone }
       if (delivery && !savedAddress) next.addresses = [{ id: `a${Date.now()}`, ...address }, ...details.addresses].slice(0, 5)
       if (!savedCard) next.cards = [{ id: `c${Date.now()}`, ...card }, ...details.cards].slice(0, 3)
       saveDetails(next)
-      setMyOrders((current) => [data, ...current])
+      setMyOrders((current) => [...placed, ...current])
       setCart([])
-      setPlacedId(data.id)
-      setCheckout((current) => ({ ...current, placing: false, notes: '', slotId: '' }))
+      setPlacedIds(placed.map((order) => order.id))
+      setCheckout((current) => ({ ...current, placing: false, notes: '', times: {} }))
       scrollTop()
     }
 
     let cta
     if (!signedIn) cta = <button type="button" className="ca-btn" onClick={ctx.openCustomerSignIn}>Sign in to checkout</button>
-    else cta = <button type="button" className="ca-btn" disabled={checkout.placing} onClick={placeOrder}>{checkout.placing ? 'Placing order…' : `Place order · ${money(cartTotals.total)}`}</button>
+    else cta = <button type="button" className="ca-btn" disabled={checkout.placing} onClick={placeOrder}>{checkout.placing ? 'Placing order…' : `Place ${many ? `${groups.length} orders` : 'order'} · ${money(sum('total'))}`}</button>
 
     return (
       <div className="ca-screen">
@@ -1095,16 +1187,70 @@ export default function CustomerApp({ ctx }) {
         <div className="ca-pad ca-stack-18 ca-pt-16 ca-pb-24">
           <Segmented label="Delivery or pickup" value={ctx.fulfillmentType} onChange={ctx.setFulfillmentType} options={[{ id: 'delivery', label: 'Delivery' }, { id: 'pickup', label: 'Pickup' }]} />
 
-          <section className="ca-stack-8">
+          <section className="ca-stack-10">
+            <h2 className="ca-h3">Your order from {shop.name}</h2>
+            {cart.map((item) => {
+              const lead = leadFor(item, shop)
+              const open = dateOpenFor === item.id
+              return (
+                <div key={item.id} className="ca-stack-8">
+                  <div className="ca-cart-item">
+                    <Photo tint={shop.tint} icon={shop.icon} className="ca-thumb-sm" />
+                    <span className="ca-cart-text"><strong>{item.title}</strong><span className="ca-muted ca-small">{item.summary || ctx.toDesignSummary(item.config)}</span></span>
+                    <span className="ca-cart-side">
+                      <strong>{money((item.unitPrice ?? item.totalPrice) * (item.quantity || 1))}</strong>
+                      <span className="ca-qty">
+                        <button type="button" aria-label={`One less ${item.title}`} onClick={() => ctx.updateCartItemQuantity(item.id, -1)}>−</button>
+                        <span>{item.quantity || 1}</span>
+                        <button type="button" aria-label={`One more ${item.title}`} onClick={() => ctx.updateCartItemQuantity(item.id, 1)}>+</button>
+                      </span>
+                    </span>
+                  </div>
+                  <div className="ca-row-between">
+                    <button type="button" className={`cx-date-btn ${open ? 'is-open' : ''}`} aria-expanded={open} onClick={() => setDateOpenFor(open ? null : item.id)}>
+                      <Icon name="calendar" size={16} />{item.date ? dateLabel(item.date) : 'Pick a date'}<span className="ca-accent-text">{open ? 'Done' : 'Change'}</span>
+                    </button>
+                    <span className="cx-note">{noticeLabel(lead)}</span>
+                  </div>
+                  {open ? (
+                    <div className="ca-stack-4">
+                      <MonthCalendar
+                        compact
+                        value={item.date}
+                        initial={item.date}
+                        onPick={(day) => setItemDate(item.id, day)}
+                        cell={(day) => {
+                          const status = dayStatus(day, shop, lead, dayLoad)
+                          return { disabled: status !== 'ok', note: STATUS_HINT[status] || '', tone: status === 'full' ? 'full' : status === 'closed' || status === 'blocked' ? 'off' : '' }
+                        }}
+                      />
+                      <span className="cx-note">Greyed-out days: not enough notice for this item, the shop is closed, or it's fully booked.</span>
+                    </div>
+                  ) : null}
+                </div>
+              )
+            })}
+            <input className="ca-input" aria-label="Note for the bakery" placeholder="Note for the bakery (allergies, colours…) (optional)" value={checkout.notes} onChange={(event) => setC({ notes: event.target.value })} />
+            <button type="button" className="ca-btn ca-btn-ghost" onClick={() => openChat(shop, 'checkout')}><Icon name="chat" size={18} />Ask {shop.name} a question</button>
+          </section>
+
+          <section className="ca-stack-10">
             <h2 className="ca-h3">{delivery ? 'Delivery time' : `Pickup time at ${shop.name}`}</h2>
-            <p className="ca-muted ca-small ca-lh">{shop.name} needs {leadLabel(shop.leadHours).replace('Order ', '').replace(' ahead', '')} notice.</p>
-            <div className="ca-stack-8">
-              {slots.map((item) => (
-                <button key={item.id} type="button" aria-pressed={slot?.id === item.id} className={`ca-slot ${slot?.id === item.id ? 'is-selected' : ''}`} onClick={() => setC({ slotId: item.id })}>
-                  <Icon name="clock" size={18} /><span>{slotLabel(item)}</span>
-                </button>
-              ))}
-            </div>
+            {many ? <p className="ca-muted ca-small ca-lh">Your items are on {groups.length} different dates, so this becomes {groups.length} orders, one per date.</p> : null}
+            {groups.map((group) => (
+              <div key={group.date} className="ca-stack-8">
+                {many ? <strong className="ca-small">{group.date ? dateLabel(group.date, true) : 'No date yet'} · {group.items.map((item) => item.title).join(', ')}</strong> : <strong className="ca-small">{group.date ? dateLabel(group.date, true) : 'Pick a date above'}</strong>}
+                {group.times.length ? (
+                  <div className="cx-chip-row">
+                    {group.times.map((time) => (
+                      <button key={time} type="button" aria-pressed={group.time === time} className={`cx-chip ${group.time === time ? 'is-on' : ''}`} onClick={() => setC({ times: { ...checkout.times, [group.date]: time } })}>
+                        {windowLabel(group.date, time).split(' · ')[1]}
+                      </button>
+                    ))}
+                  </div>
+                ) : <span className="ca-muted ca-small">No times left that day. Pick another date.</span>}
+              </div>
+            ))}
           </section>
 
           {delivery ? (
@@ -1131,25 +1277,6 @@ export default function CustomerApp({ ctx }) {
           <section className="ca-stack-8">
             <h2 className="ca-h3">Phone</h2>
             <input className="ca-input" type="tel" autoComplete="tel" aria-label="Phone number" placeholder={delivery ? 'So the driver can reach you' : 'So the bakery can reach you'} value={checkout.phone || details.phone} onChange={(event) => setC({ phone: event.target.value })} />
-          </section>
-
-          <section className="ca-stack-10">
-            <h2 className="ca-h3">Your order from {shop.name}</h2>
-            {cart.map((item) => (
-              <div key={item.id} className="ca-cart-item">
-                <Photo tint={shop.tint} icon={shop.icon} className="ca-thumb-sm" />
-                <span className="ca-cart-text"><strong>{item.title}</strong><span className="ca-muted ca-small">{item.summary || ctx.toDesignSummary(item.config)}</span></span>
-                <span className="ca-cart-side">
-                  <strong>{money((item.unitPrice ?? item.totalPrice) * (item.quantity || 1))}</strong>
-                  <span className="ca-qty">
-                    <button type="button" aria-label={`One less ${item.title}`} onClick={() => ctx.updateCartItemQuantity(item.id, -1)}>−</button>
-                    <span>{item.quantity || 1}</span>
-                    <button type="button" aria-label={`One more ${item.title}`} onClick={() => ctx.updateCartItemQuantity(item.id, 1)}>+</button>
-                  </span>
-                </span>
-              </div>
-            ))}
-            <input className="ca-input" aria-label="Note for the bakery" placeholder="Note for the bakery (allergies, colours…) (optional)" value={checkout.notes} onChange={(event) => setC({ notes: event.target.value })} />
           </section>
 
           {delivery ? (
@@ -1185,12 +1312,12 @@ export default function CustomerApp({ ctx }) {
           ) : null}
 
           <dl className="ca-totals">
-            <dt>Subtotal</dt><dd>{money(cartTotals.subtotal)}</dd>
-            {delivery ? <><dt>Delivery fee</dt><dd>{money(cartTotals.delivery)}</dd></> : null}
-            <dt>Service fee</dt><dd>{money(cartTotals.service)}</dd>
-            <dt>GST</dt><dd>{money(cartTotals.tax)}</dd>
-            {cartTotals.tip ? <><dt>Driver tip</dt><dd>{money(cartTotals.tip)}</dd></> : null}
-            <dt className="ca-total">Total</dt><dd className="ca-total">{money(cartTotals.total)}</dd>
+            <dt>Subtotal</dt><dd>{money(sum('subtotal'))}</dd>
+            {delivery ? <><dt>Delivery fee{many ? ` × ${groups.length}` : ''}</dt><dd>{money(sum('deliveryFee'))}</dd></> : null}
+            <dt>Service fee{many ? ` × ${groups.length}` : ''}</dt><dd>{money(sum('service'))}</dd>
+            <dt>GST</dt><dd>{money(sum('tax'))}</dd>
+            {tipEach ? <><dt>Driver tip{many ? ` × ${groups.length}` : ''}</dt><dd>{money(sum('tip'))}</dd></> : null}
+            <dt className="ca-total">Total</dt><dd className="ca-total">{money(sum('total'))}</dd>
           </dl>
           {checkout.error ? <p className="ca-toast is-error is-inline" role="alert">{checkout.error}</p> : null}
         </div>
@@ -1243,6 +1370,7 @@ export default function CustomerApp({ ctx }) {
             {order.fulfillment === 'delivery' && order.dropoff ? <span className="ca-muted">To {order.dropoff.line1}, {order.dropoff.city}</span> : null}
             {order.fulfillment === 'pickup' ? <span className="ca-muted">Pick up at {[order.bakery_address, order.bakery_area].filter(Boolean).join(', ')}</span> : null}
           </div>
+          <button type="button" className="ca-btn ca-btn-ghost" onClick={() => openChat({ id: order.bakery_id, name: order.bakery_name }, view)}><Icon name="chat" size={18} />Message {order.bakery_name}</button>
           {status === 'new' ? <button type="button" className="ca-btn ca-btn-ghost" onClick={cancel}>Cancel order</button> : null}
           <button type="button" className="ca-btn ca-btn-ghost" onClick={() => { setAccountPage('help'); go('account'); setAccountPage('help') }}><Icon name="help" size={18} />Get help with this order</button>
           <p className="ca-muted ca-small">This page updates on its own.</p>
@@ -1259,6 +1387,15 @@ export default function CustomerApp({ ctx }) {
     return (
       <div className="ca-screen has-nav">
         <div className="ca-pad ca-pt-16"><h1 className="ca-h1">Orders</h1></div>
+        {signedIn ? (
+          <div className="ca-pad ca-section">
+            <button type="button" className={`ca-list-row ${unreadMessages ? 'is-highlight' : ''}`} onClick={() => { setChat(null); setChatReturn('orders'); go('messages') }}>
+              <span className="ca-list-icon"><Icon name="chat" /></span>
+              <span className="ca-list-text"><strong>Messages{unreadMessages ? ` · ${unreadMessages} new` : ''}</strong><span className="ca-muted">Chat with your bakeries</span></span>
+              <Icon name="chevron" size={18} />
+            </button>
+          </div>
+        ) : null}
         {cart.length ? (
           <div className="ca-pad ca-section">
             <button type="button" className="ca-list-row is-highlight" onClick={() => go('checkout')}>
@@ -1373,7 +1510,7 @@ export default function CustomerApp({ ctx }) {
           <div className="ca-pad ca-section ca-grid-3">
             <button type="button" className="ca-quick" onClick={() => go('orders')}><Icon name="orders" />Orders</button>
             <button type="button" className="ca-quick" onClick={() => setAccountPage('saved')}><Icon name="cake" />Saved cakes</button>
-            <button type="button" className="ca-quick" onClick={() => go('checkout')}><Icon name="cart" />Cart</button>
+            <button type="button" className="ca-quick" onClick={() => { setChat(null); setChatReturn('account'); go('messages') }}><Icon name="chat" />Messages{unreadMessages ? ` (${unreadMessages})` : ''}</button>
           </div>
         ) : (
           <div className="ca-pad ca-section"><button type="button" className="ca-btn" onClick={ctx.openCustomerSignIn}>Sign in with Google</button></div>
@@ -1403,6 +1540,33 @@ export default function CustomerApp({ ctx }) {
           </a>
         </div>
         {signedIn ? <div className="ca-pad ca-section"><button type="button" className="ca-btn ca-btn-ghost" disabled={uiState.authUpdating} onClick={ctx.handleCustomerLogout}>{uiState.authUpdating ? 'Signing out…' : 'Sign out'}</button></div> : null}
+      </div>
+    )
+  }
+
+  function renderMessages() {
+    const back = () => { if (chat) { setChat(null); loadConversations() } else go(chatReturn || 'home') }
+    if (!signedIn) {
+      return (
+        <div className="ca-screen">
+          <TopBar title="Messages" onBack={() => go('home')} />
+          <div className="ca-empty"><strong>Sign in to message bakeries</strong><button type="button" className="ca-btn ca-mt-12" onClick={ctx.openCustomerSignIn}>Sign in</button></div>
+        </div>
+      )
+    }
+    if (chat) {
+      return (
+        <div className="ca-chat-screen">
+          <ChatThread conversationId={chat.id} side="customer" title={chat.bakery_name} subtitle="Usually replies within a few hours" onBack={back} placeholder={`Message ${chat.bakery_name}`} />
+        </div>
+      )
+    }
+    return (
+      <div className="ca-screen">
+        <TopBar title="Messages" onBack={back} />
+        <div className="ca-pad ca-pt-16">
+          <ConversationList conversations={conversations} side="customer" onOpen={(item) => setChat(item)} empty="No messages yet. Open a bakery and tap “Message” to ask a question." />
+        </div>
       </div>
     )
   }
@@ -1469,6 +1633,7 @@ export default function CustomerApp({ ctx }) {
   else if (view === 'orders') screen = renderOrders()
   else if (view === 'account') screen = renderAccount()
   else if (view === 'settings') screen = renderSettings()
+  else if (view === 'messages') screen = renderMessages()
   else screen = renderHome()
 
   const showNav = ['home', 'search', 'orders', 'account'].includes(view) && !(view === 'orders' && openOrderId) && !(view === 'account' && accountPage !== 'main')
@@ -1478,7 +1643,7 @@ export default function CustomerApp({ ctx }) {
       <div className="ca-phone">
         {renderToast()}
         {screen}
-        {showNav ? <BottomNav view={view} go={go} cartCount={cartCount} /> : null}
+        {showNav ? <BottomNav view={view} go={go} cartCount={cartCount} unread={unreadMessages} /> : null}
         {pendingItem ? (
           <div className="ca-modal-backdrop" role="dialog" aria-modal="true" aria-labelledby="ca-newcart-title">
             <div className="ca-modal">

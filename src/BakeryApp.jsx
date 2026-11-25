@@ -2,6 +2,8 @@ import { useCallback, useEffect, useState } from 'react'
 import { CATEGORIES, SHOPS } from './catalog.js'
 import { friendlyError, supabase, uploadDocument } from './supabaseClient.js'
 import { BC_AREAS, Badge, Check, Field, FileField, Loading, Notice, Shell, SignInScreen, money, useSession, when } from './partnerShared.jsx'
+import { DEFAULT_TIMES, NOTICE_OPTIONS, WEEKDAYS, dateLabel, timeLabel, vanDate, weekday } from './schedule.js'
+import { ChatThread, ConversationList, MonthCalendar, useConversations } from './widgets.jsx'
 
 const TITLE = 'Sell your cakes'
 const SHOP_TYPES = CATEGORIES.filter((item) => item.id !== 'all')
@@ -69,7 +71,7 @@ function BakeryHome({ user }) {
       <Shell title={TITLE} user={user}>
         <section className="pt-card pt-stack">
           <div className="pt-row"><h1 className="pt-h1">{application.business_name}</h1><Badge status={application.status} /></div>
-          {application.status === 'pending' ? <p>Thanks! We’re reviewing your application and food permit. We’ll email {application.email || user.email} when you’re approved, usually within 2 business days.</p> : null}
+          {application.status === 'pending' ? <p>Thanks! We’re reviewing your application and food permit. We’ll text you at {application.phone} when you’re approved, usually within 2 business days.</p> : null}
           {application.status === 'rejected' ? <><p>We couldn’t approve your application yet.</p>{application.review_note ? <Notice kind="error">{application.review_note}</Notice> : null}<button type="button" className="pt-btn" onClick={() => setEditing(true)}>Update and resubmit</button></> : null}
           {application.status === 'suspended' ? <p>Your shop is paused. Contact support to find out more.</p> : null}
           <dl className="pt-dl">
@@ -205,8 +207,12 @@ function BakeryDashboard({ user, bakery, onSaved }) {
     { id: 'done', title: 'Completed', match: ['picked_up', 'delivered', 'cancelled'] },
   ]
   const newCount = orders.filter((order) => order.status === 'new').length
+  const [conversations, loadConversations] = useConversations({ bakeryId: bakery.id })
+  const unread = conversations.reduce((sum, item) => sum + (item.bakery_unread || 0), 0)
   const tabs = [
     { id: 'orders', label: 'Orders', count: newCount },
+    { id: 'calendar', label: 'Calendar' },
+    { id: 'messages', label: 'Messages', count: unread },
     { id: 'menu', label: 'Menu' },
     { id: 'shop', label: 'Shop settings' },
   ]
@@ -249,6 +255,8 @@ function BakeryDashboard({ user, bakery, onSaved }) {
           })}
         </div>
       ) : null}
+      {tab === 'calendar' ? <BakeryCalendar bakery={bakery} orders={orders} onSaved={onSaved} /> : null}
+      {tab === 'messages' ? <BakeryMessages conversations={conversations} reload={loadConversations} /> : null}
       {tab === 'menu' ? <MenuEditor bakery={bakery} onSaved={onSaved} /> : null}
       {tab === 'shop' ? <ShopSettings bakery={bakery} onSaved={onSaved} /> : null}
     </Shell>
@@ -267,7 +275,7 @@ function MenuEditor({ bakery, onSaved }) {
 
   async function save() {
     setBusy(true); setMessage(''); setError('')
-    const clean = items.filter((item) => item.title.trim()).map((item, index) => ({ id: item.id || `${bakery.id}-m${Date.now()}-${index}`, title: item.title.trim(), detail: (item.detail || '').trim(), price: Math.max(0, Number(item.price) || 0) }))
+    const clean = items.filter((item) => item.title.trim()).map((item, index) => ({ id: item.id || `${bakery.id}-m${Date.now()}-${index}`, title: item.title.trim(), detail: (item.detail || '').trim(), price: Math.max(0, Number(item.price) || 0), leadHours: Number(item.leadHours) || 0 }))
     const { error: err } = await supabase.from('bakeries').update({ builder, menu: clean }).eq('id', bakery.id)
     setBusy(false)
     if (err) setError(friendlyError(err))
@@ -286,6 +294,9 @@ function MenuEditor({ bakery, onSaved }) {
           </select>
         </Field>
         <Field label="What customers build" required hint="e.g. cake, cupcakes, donut box"><input className="pt-input" value={builder.noun || ''} onChange={(e) => setBuilder((current) => ({ ...current, noun: e.target.value }))} /></Field>
+        <Field label="Notice needed for custom orders" hint={`Customers can't pick dates sooner than this. Your shop default is ${Math.round(bakery.lead_hours / 24) || 1} day(s).`}>
+          <NoticeSelect value={builder.leadHours || 0} onChange={(hours) => setBuilder((current) => ({ ...current, leadHours: hours }))} />
+        </Field>
         {builder.kind === 'cake' ? (
           <Field label="Most layers you can make" required>
             <input className="pt-input" type="number" min={1} max={12} value={builder.maxLayers || 4} onChange={(e) => setBuilder((current) => ({ ...current, maxLayers: Math.min(12, Math.max(1, Number(e.target.value) || 1)) }))} />
@@ -296,13 +307,15 @@ function MenuEditor({ bakery, onSaved }) {
       </section>
 
       <section className="pt-card pt-stack">
-        <div className="pt-row"><h2 className="pt-h2">Ready-made cakes</h2><button type="button" className="pt-btn is-ghost" onClick={() => setItems((current) => [...current, { title: '', detail: '', price: '' }])}>+ Add item</button></div>
+        <div className="pt-row"><h2 className="pt-h2">Ready-made cakes</h2><button type="button" className="pt-btn is-ghost" onClick={() => setItems((current) => [...current, { title: '', detail: '', price: '', leadHours: 0 }])}>+ Add item</button></div>
+        <p className="pt-muted pt-small">Set a longer notice on items that take more time. Customers only see dates that work for each item.</p>
         {!items.length ? <p className="pt-muted">No ready-made items yet.</p> : null}
         {items.map((item, index) => (
           <div key={item.id || index} className="pt-menu-row">
             <input className="pt-input" aria-label="Item name" placeholder="Name" value={item.title} onChange={(e) => setItem(index, 'title', e.target.value)} />
             <input className="pt-input" aria-label="Description" placeholder="Description" value={item.detail} onChange={(e) => setItem(index, 'detail', e.target.value)} />
             <input className="pt-input pt-price" aria-label="Price" inputMode="decimal" placeholder="Price" value={item.price} onChange={(e) => setItem(index, 'price', e.target.value.replace(/[^\d.]/g, ''))} />
+            <NoticeSelect value={item.leadHours || 0} onChange={(hours) => setItem(index, 'leadHours', hours)} label={`Notice for ${item.title || 'item'}`} />
             <button type="button" className="pt-link-btn" aria-label={`Remove ${item.title || 'item'}`} onClick={() => setItems((current) => current.filter((_, i) => i !== index))}>Remove</button>
           </div>
         ))}
@@ -315,7 +328,8 @@ function MenuEditor({ bakery, onSaved }) {
 }
 
 function ShopSettings({ bakery, onSaved }) {
-  const [form, setForm] = useState({ name: bakery.name, tagline: bakery.tagline, address: bakery.address, area: bakery.area, phone: bakery.phone || '', lead_hours: bakery.lead_hours, active: bakery.active })
+  const [form, setForm] = useState({ name: bakery.name, tagline: bakery.tagline, address: bakery.address, area: bakery.area, phone: bakery.phone || '', lead_hours: bakery.lead_hours, active: bakery.active, closed_days: bakery.closed_days || [], pickup_times: bakery.pickup_times?.length ? bakery.pickup_times : DEFAULT_TIMES, daily_capacity: bakery.daily_capacity ?? '' })
+  const [newTime, setNewTime] = useState('11:00')
   const [busy, setBusy] = useState(false)
   const [message, setMessage] = useState('')
   const [error, setError] = useState('')
@@ -325,7 +339,9 @@ function ShopSettings({ bakery, onSaved }) {
   async function save() {
     setBusy(true); setMessage(''); setError('')
     const template = templateFor(bakery.category)
-    const patch = { ...form, lead_hours: Math.max(1, Number(form.lead_hours) || 24) }
+    if (!form.pickup_times.length) { setBusy(false); setError('Add at least one pickup time.'); return }
+    if (form.closed_days.length === 7) { setBusy(false); setError('Leave at least one day open.'); return }
+    const patch = { ...form, lead_hours: Math.max(1, Number(form.lead_hours) || 24), daily_capacity: Number(form.daily_capacity) > 0 ? Math.round(Number(form.daily_capacity)) : null, pickup_times: [...form.pickup_times].sort() }
     if (!bakery.builder || !Object.keys(bakery.builder).length) Object.assign(patch, { builder: template.builder, icon: template.icon, tint: template.tint })
     const { error: err } = await supabase.from('bakeries').update(patch).eq('id', bakery.id)
     setBusy(false)
@@ -340,16 +356,135 @@ function ShopSettings({ bakery, onSaved }) {
         <Field label="One line about your shop"><input className="pt-input" maxLength={90} value={form.tagline} onChange={(e) => set('tagline', e.target.value)} /></Field>
         <Field label="Pickup address" required><input className="pt-input" value={form.address} onChange={(e) => set('address', e.target.value)} /></Field>
         <Field label="City" required><select className="pt-input" value={form.area} onChange={(e) => set('area', e.target.value)}>{BC_AREAS.map((area) => <option key={area}>{area}</option>)}</select></Field>
-        <Field label="Shop phone"><input className="pt-input" type="tel" value={form.phone} onChange={(e) => set('phone', e.target.value)} /></Field>
+        <Field label="Shop phone" hint="We text new orders and customer messages to this number."><input className="pt-input" type="tel" value={form.phone} onChange={(e) => set('phone', e.target.value)} /></Field>
         <Field label="How much notice you need (hours)" required hint="Customers can only choose pickup times after this. 24 = next day, 336 = 2 weeks.">
           <input className="pt-input" type="number" min={1} value={form.lead_hours} onChange={(e) => set('lead_hours', e.target.value)} />
         </Field>
         <Check checked={form.active} onChange={(v) => set('active', v)}>Show my shop to customers</Check>
+      </section>
+      <section className="pt-card pt-stack">
+        <h2 className="pt-h2">Days and times</h2>
+        <Field label="Days you're open for pickup and delivery" hint="Tap a day to close it. Block single dates (holidays, busy weekends) in the Calendar tab.">
+          <div className="cx-chip-row">
+            {WEEKDAYS.map((name, index) => {
+              const open = !form.closed_days.includes(index)
+              return <button key={name} type="button" aria-pressed={open} className={`cx-chip ${open ? 'is-on' : ''}`} onClick={() => set('closed_days', open ? [...form.closed_days, index] : form.closed_days.filter((day) => day !== index))}>{name}</button>
+            })}
+          </div>
+        </Field>
+        <Field label="Pickup and delivery times" hint="Customers choose one of these. Each is a 1-hour window.">
+          <div className="cx-chip-row">
+            {[...form.pickup_times].sort().map((time) => (
+              <span key={time} className="cx-chip is-on">{timeLabel(time)}<button type="button" aria-label={`Remove ${timeLabel(time)}`} onClick={() => set('pickup_times', form.pickup_times.filter((item) => item !== time))}>×</button></span>
+            ))}
+          </div>
+          <div className="pt-row pt-row-start">
+            <input className="pt-input pt-time" type="time" step={1800} aria-label="New pickup time" value={newTime} onChange={(e) => setNewTime(e.target.value)} />
+            <button type="button" className="pt-btn is-ghost" onClick={() => { if (newTime && !form.pickup_times.includes(newTime)) set('pickup_times', [...form.pickup_times, newTime]) }}>+ Add time</button>
+          </div>
+        </Field>
+        <Field label="Most orders per day" hint="When a day reaches this, customers see it as fully booked. Leave blank for no limit.">
+          <input className="pt-input" type="number" min={1} placeholder="No limit" value={form.daily_capacity} onChange={(e) => set('daily_capacity', e.target.value)} />
+        </Field>
         {form.active && !ready ? <Notice>Add your menu first so customers have something to order. Your build-your-own item uses the {SHOP_TYPES.find((item) => item.id === bakery.category)?.label.toLowerCase()} template until you change it.</Notice> : null}
       </section>
       {error ? <Notice kind="error">{error}</Notice> : null}
       {message ? <Notice kind="ok">{message}</Notice> : null}
       <button type="button" className="pt-btn is-large" disabled={busy} onClick={save}>{busy ? 'Saving…' : 'Save settings'}</button>
+    </div>
+  )
+}
+
+function NoticeSelect({ value, onChange, label }) {
+  return (
+    <select className="pt-input" aria-label={label || 'Notice needed'} value={value || 0} onChange={(e) => onChange(Number(e.target.value))}>
+      {NOTICE_OPTIONS.map((option) => <option key={option.hours} value={option.hours}>{option.hours ? `${option.label} notice` : 'Shop default notice'}</option>)}
+    </select>
+  )
+}
+
+function orderDay(order) {
+  return order.ready_at ? vanDate(new Date(order.ready_at)) : ''
+}
+
+function BakeryCalendar({ bakery, orders, onSaved }) {
+  const [day, setDay] = useState(vanDate())
+  const [busy, setBusy] = useState(false)
+  const [error, setError] = useState('')
+  const live = orders.filter((order) => order.status !== 'cancelled')
+  const counts = live.reduce((acc, order) => { const key = orderDay(order); acc[key] = (acc[key] || 0) + 1; return acc }, {})
+  const blocked = bakery.blocked_dates || []
+  const closed = bakery.closed_days || []
+  const capacity = bakery.daily_capacity
+  const dayOrders = live.filter((order) => orderDay(order) === day).sort((a, b) => String(a.ready_at).localeCompare(String(b.ready_at)))
+  const isBlocked = blocked.includes(day)
+  const isClosed = closed.includes(weekday(day))
+  const upcoming = Object.entries(counts).filter(([key]) => key >= vanDate()).sort().slice(0, 7)
+
+  async function toggleBlock() {
+    setBusy(true); setError('')
+    const next = isBlocked ? blocked.filter((item) => item !== day) : [...blocked, day].sort()
+    const { error: err } = await supabase.from('bakeries').update({ blocked_dates: next }).eq('id', bakery.id)
+    setBusy(false)
+    if (err) setError(err.message)
+    else onSaved()
+  }
+
+  return (
+    <div className="pt-cal-layout">
+      <div className="pt-stack">
+        <MonthCalendar
+          value={day}
+          onPick={setDay}
+          minMonth={vanDate()}
+          maxMonths={12}
+          cell={(date) => {
+            const count = counts[date] || 0
+            const off = blocked.includes(date) || closed.includes(weekday(date))
+            return { count: count ? (capacity ? `${count}/${capacity}` : String(count)) : '', tone: off ? 'off' : capacity && count >= capacity ? 'full' : count ? 'busy' : '', note: off ? 'Closed' : count ? `${count} order${count === 1 ? '' : 's'}` : '' }
+          }}
+        />
+        <div className="cx-cal-legend"><span><i className="is-busy" />Has orders</span><span><i className="is-full" />Fully booked</span><span><i className="is-off" />Closed or blocked</span></div>
+        {upcoming.length ? (
+          <section className="pt-card pt-stack">
+            <h2 className="pt-h2">Coming up</h2>
+            {upcoming.map(([date, count]) => (
+              <button key={date} type="button" className="pt-row pt-plain-row" onClick={() => setDay(date)}><span>{dateLabel(date, true)}</span><strong>{count} order{count === 1 ? '' : 's'}</strong></button>
+            ))}
+          </section>
+        ) : null}
+      </div>
+      <section className="pt-card pt-stack">
+        <div className="pt-row"><h2 className="pt-h2">{dateLabel(day, true)}</h2><span className="pt-muted">{dayOrders.length} order{dayOrders.length === 1 ? '' : 's'}{capacity ? ` of ${capacity}` : ''}</span></div>
+        {isClosed ? <Notice>You're closed on {WEEKDAYS[weekday(day)]}s. Change your open days in Shop settings.</Notice> : null}
+        {!isClosed && day >= vanDate() ? (
+          <button type="button" className="pt-btn is-ghost" disabled={busy} onClick={toggleBlock}>{isBlocked ? 'Open this day for orders again' : 'Block this day (no new orders)'}</button>
+        ) : null}
+        {isBlocked ? <Notice>Blocked: customers can't pick this day. Orders already booked stay.</Notice> : null}
+        {error ? <Notice kind="error">{error}</Notice> : null}
+        {!dayOrders.length ? <p className="pt-muted">Nothing due this day.</p> : null}
+        {dayOrders.map((order) => (
+          <article key={order.id} className="pt-cal-order">
+            <div className="pt-row"><strong>{(order.ready_window || '').split(' · ')[1] || when(order.ready_at)} · {order.fulfillment === 'delivery' ? 'Delivery' : 'Pickup'}</strong><Badge status={order.status} /></div>
+            <span className="pt-small">#{order.id.slice(0, 6).toUpperCase()} · {order.customer_name || 'Customer'}</span>
+            {(order.items || []).map((item, index) => <span key={index} className="pt-small"><strong>{item.quantity || 1}× {item.title}</strong>{item.summary ? ` · ${item.summary}` : ''}</span>)}
+            {order.notes ? <span className="pt-small pt-muted">Note: {order.notes}</span> : null}
+          </article>
+        ))}
+      </section>
+    </div>
+  )
+}
+
+function BakeryMessages({ conversations, reload }) {
+  const [open, setOpen] = useState(null)
+  if (open) {
+    return <ChatThread conversationId={open.id} side="bakery" title={open.customer_name || 'Customer'} subtitle="Customer" onBack={() => { setOpen(null); reload() }} placeholder="Reply to the customer" />
+  }
+  return (
+    <div className="pt-stack">
+      <p className="pt-muted">Customers can message you before and after ordering. You'll get a text when a new message comes in.</p>
+      <ConversationList conversations={conversations} side="bakery" onOpen={setOpen} empty="No messages yet." />
     </div>
   )
 }
