@@ -1,11 +1,11 @@
 import { useCallback, useEffect, useState } from 'react'
 import { CATEGORIES, SHOPS } from './catalog.js'
 import { friendlyError, supabase, uploadDocument } from './supabaseClient.js'
-import { Badge, Check, Field, FileField, LocationsEditor, Loading, Notice, Shell, SignInScreen, locationsProblem, money, useAccountGate, useSession, when } from './partnerShared.jsx'
+import { Badge, Check, Field, FileField, LocationsEditor, Loading, Notice, Shell, SignInScreen, WorkEligibility, eligibilityDocs, eligibilityMissing, locationsProblem, money, useAccountGate, useSession, when } from './partnerShared.jsx'
 import { newLocation, shopLocations, withCoordinates } from './geo.js'
 import { DEFAULT_TIMES, NOTICE_OPTIONS, WEEKDAYS, dateLabel, timeLabel, vanDate, weekday } from './schedule.js'
 import { LIBRARY, cakeOptions } from './builderLibrary.js'
-import { ChatThread, ConversationList, MonthCalendar, PhoneInput, PhoneVerify, useConversations } from './widgets.jsx'
+import { ChatThread, ConversationList, MonthCalendar, PayoutSetup, PhoneInput, PhoneVerify, SetupChecklist, usePayoutSummary, useConversations } from './widgets.jsx'
 import { cleanPermit, permitProblem, phoneProblem } from './validate.js'
 
 const TITLE = 'Sell your cakes'
@@ -65,6 +65,13 @@ function BakeryHome({ user }) {
   }, [user.id])
 
   useEffect(() => { load() }, [load])
+  // While the application is being reviewed, check every 20 seconds so approval shows up on its own.
+  const waiting = application && (application.status === 'pending' || (application.status === 'approved' && !bakery))
+  useEffect(() => {
+    if (!waiting || editing) return undefined
+    const timer = setInterval(load, 20000)
+    return () => clearInterval(timer)
+  }, [waiting, editing, load])
 
   if (application === undefined) return <Loading title={TITLE} />
   if (!application || editing) {
@@ -81,25 +88,29 @@ function BakeryHome({ user }) {
         <section className="pt-card pt-stack">
           <div className="pt-row"><h1 className="pt-h1">{application.business_name}</h1><Badge status={application.status} /></div>
           {application.status === 'pending' ? <p>Thanks! We’re reviewing your application and food permit. We’ll text you at {application.phone} when you’re approved, usually within 2 business days.</p> : null}
-          {application.status === 'rejected' ? <><p>We couldn’t approve your application yet.</p>{application.review_note ? <Notice kind="error">{application.review_note}</Notice> : null}<button type="button" className="pt-btn" onClick={() => setEditing(true)}>Update and resubmit</button></> : null}
-          {application.status === 'suspended' ? <p>Your shop is paused. Contact support to find out more.</p> : null}
+          {application.status === 'pending' ? <p className="pt-muted pt-small">This page updates on its own when we’ve reviewed it.</p> : null}
+          {application.status === 'approved' ? <p>You’re approved! We’re setting up your shop. This page will update in a moment.</p> : null}
+          {application.status === 'rejected' ? <><p>We couldn’t approve your application{application.reviewed_at ? ` (reviewed ${when(application.reviewed_at)})` : ''}.</p><Notice kind="error"><strong>Reason:</strong> {application.review_note || 'No reason was given. Message us from the customer app’s Help page and we’ll explain.'}</Notice><button type="button" className="pt-btn" onClick={() => setEditing(true)}>Fix and resubmit</button></> : null}
+          {application.status === 'suspended' ? <><p>Your shop is paused. Contact support to find out more.</p>{application.review_note ? <Notice kind="error"><strong>Reason:</strong> {application.review_note}</Notice> : null}</> : null}
           <dl className="pt-dl">
             <dt>Address</dt><dd>{application.address}, {application.city}</dd>
             <dt>Shop type</dt><dd>{SHOP_TYPES.find((item) => item.id === application.category)?.label}</dd>
             <dt>Submitted</dt><dd>{when(application.created_at)}</dd>
+            {application.reviewed_at && application.status !== 'pending' ? <><dt>{application.status === 'approved' ? 'Approved' : application.status === 'rejected' ? 'Not approved' : 'Updated'}</dt><dd>{when(application.reviewed_at)}</dd></> : null}
           </dl>
           {application.status === 'pending' ? <button type="button" className="pt-btn is-ghost" onClick={() => setEditing(true)}>Edit my application</button> : null}
         </section>
       </Shell>
     )
   }
-  return <BakeryDashboard user={user} bakery={bakery} onSaved={load} />
+  return <BakeryDashboard user={user} bakery={bakery} application={application} onSaved={load} />
 }
 
 function BakeryForm({ user, existing, onDone }) {
   const [form, setForm] = useState(() => ({
     business_name: '', contact_name: user.user_metadata?.full_name || '', phone: '', address: '', city: 'Vancouver',
     category: 'cakes', description: '', food_permit_number: '', agree: false, ...(existing || {}),
+    email: existing?.email || user.email || '', permit_expiry: existing?.permit_expiry || '', immigration_status: existing?.immigration_status || '',
     locations: existing?.locations?.length ? existing.locations : [{ ...newLocation(), name: '', address: existing?.address || '', city: existing?.city || 'Vancouver' }],
   }))
   const [files, setFiles] = useState({})
@@ -109,10 +120,14 @@ function BakeryForm({ user, existing, onDone }) {
   const haveDoc = (id) => Boolean(files[id] || existing?.documents?.[id])
   const [phoneOk, setPhoneOk] = useState(false)
   const permitError = permitProblem(form.food_permit_number)
+  const today = new Date().toISOString().slice(0, 10)
+  const emailError = form.email && !/^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/.test(form.email.trim()) ? 'Enter a valid email address.' : ''
 
   const missing = [
     !form.business_name.trim() && 'your bakery’s name',
     !form.contact_name.trim() && 'a contact name',
+    !form.email.trim() && 'an email address',
+    emailError && 'a valid email address',
     !form.phone.trim() && 'a phone number',
     phoneProblem(form.phone) && 'a 10-digit phone number',
     form.phone.trim() && !phoneProblem(form.phone) && !phoneOk && 'a verified phone number (tap “Text me a code”)',
@@ -120,6 +135,7 @@ function BakeryForm({ user, existing, onDone }) {
     !form.food_permit_number?.trim() && 'your food permit number',
     permitError && 'a valid food permit number',
     ...DOCS.filter((doc) => doc.required && !haveDoc(doc.id)).map((doc) => `a copy of your ${doc.label.toLowerCase()}`),
+    ...eligibilityMissing(form, haveDoc, today),
     !form.agree && !existing && 'agreement to the partner terms',
   ].filter(Boolean)
 
@@ -129,12 +145,13 @@ function BakeryForm({ user, existing, onDone }) {
     setBusy(true); setError('')
     try {
       const documents = { ...(existing?.documents || {}) }
-      for (const doc of DOCS) {
+      for (const doc of [...DOCS, ...eligibilityDocs(form.immigration_status)]) {
         if (files[doc.id]) documents[doc.id] = await uploadDocument(user.id, doc.id, files[doc.id])
       }
       const locations = await withCoordinates(form.locations.map((item) => ({ ...item, name: item.name.trim(), address: item.address.trim() })))
       const row = {
-        user_id: user.id, status: 'pending', email: user.email,
+        user_id: user.id, status: 'pending', email: form.email.trim().toLowerCase(),
+        immigration_status: form.immigration_status, permit_expiry: form.permit_expiry || null,
         business_name: form.business_name.trim(), contact_name: form.contact_name.trim(), phone: form.phone.trim(),
         locations, address: locations[0].address, city: locations[0].city, category: form.category, description: form.description.trim(),
         food_permit_number: cleanPermit(form.food_permit_number), documents,
@@ -172,9 +189,11 @@ function BakeryForm({ user, existing, onDone }) {
       <section className="pt-card pt-stack">
         <h2 className="pt-h2">Contact</h2>
         <Field label="Contact name" required><input className="pt-input" autoComplete="name" value={form.contact_name} onChange={(e) => set('contact_name', e.target.value)} /></Field>
+        <Field label="Email" required error={emailError} hint="We email you about your application and orders."><input className="pt-input" type="email" autoComplete="email" value={form.email} onChange={(e) => set('email', e.target.value)} /></Field>
         <Field label="Phone" required hint="We text you about orders and your application."><PhoneInput value={form.phone} onChange={(phone) => set('phone', phone)} /></Field>
         <PhoneVerify phone={form.phone} onOkChange={setPhoneOk} />
       </section>
+      <WorkEligibility form={form} set={set} files={files} setFiles={setFiles} today={today} />
       <section className="pt-card pt-stack">
         <h2 className="pt-h2">Permits</h2>
         <Field label="Food premises permit number" required error={permitError} hint="As printed on your health permit, e.g. 253639 or FH-12345."><input className="pt-input" autoCapitalize="characters" spellCheck={false} maxLength={30} value={form.food_permit_number || ''} onChange={(e) => set('food_permit_number', e.target.value)} onBlur={(e) => set('food_permit_number', cleanPermit(e.target.value))} /></Field>
@@ -193,8 +212,8 @@ function BakeryForm({ user, existing, onDone }) {
   )
 }
 
-function BakeryDashboard({ user, bakery, onSaved }) {
-  const [tab, setTab] = useState('orders')
+function BakeryDashboard({ user, bakery, application, onSaved }) {
+  const [tab, setTab] = useState(bakery.active ? 'orders' : 'setup')
   const [orders, setOrders] = useState([])
   const [error, setError] = useState('')
   const [busyId, setBusyId] = useState('')
@@ -228,17 +247,34 @@ function BakeryDashboard({ user, bakery, onSaved }) {
   const newCount = orders.filter((order) => order.status === 'new').length
   const [conversations, loadConversations] = useConversations({ bakeryId: bakery.id })
   const unread = conversations.reduce((sum, item) => sum + (item.bakery_unread || 0), 0)
+  const [payout, reloadPayout] = usePayoutSummary(user.id)
+  const optionsDone = Boolean((bakery.builder && Object.keys(bakery.builder).length) || (bakery.menu || []).length)
+  const setupLeft = [!optionsDone, !payout?.bank_last4, !bakery.active].filter(Boolean).length
   const tabs = [
+    ...(setupLeft ? [{ id: 'setup', label: 'Get started', count: setupLeft }] : []),
     { id: 'orders', label: 'Orders', count: newCount },
     { id: 'calendar', label: 'Calendar' },
     { id: 'messages', label: 'Messages', count: unread },
     { id: 'menu', label: 'Menu' },
     { id: 'shop', label: 'Shop settings' },
+    { id: 'payouts', label: 'Payouts' },
   ]
 
   return (
     <Shell title={bakery.name} user={user} tabs={tabs} tab={tab} onTab={setTab} wide>
-      {!bakery.active ? <Notice>Your shop is hidden from customers. Add your menu, then turn on “Show my shop to customers” in Shop settings.</Notice> : null}
+      {!bakery.active && tab !== 'setup' ? <Notice>Your shop isn’t live yet. <button type="button" className="pt-link-btn" onClick={() => setTab('setup')}>See what’s left</button></Notice> : null}
+      {tab === 'setup' ? (
+        <SetupChecklist
+          approvedAt={application?.reviewed_at}
+          steps={[
+            { done: optionsDone, title: 'Choose what customers can order', text: 'Pick your flavours, fillings, frostings, sizes and layers, and set your prices.', action: 'Set up my options', onClick: () => setTab('menu') },
+            { done: Boolean(payout?.bank_last4), title: 'Add your bank details for payouts', text: 'Where we send your earnings. Stored encrypted; only you and our payouts team can see it.', action: 'Add bank details', onClick: () => setTab('payouts') },
+            { done: bakery.active, title: 'Go live', text: optionsDone ? 'Your shop appears in the customer app as soon as you publish.' : 'Your shop goes live automatically when you save your options.', action: 'Publish my shop', disabled: !optionsDone, onClick: async () => { await supabase.from('bakeries').update({ active: true }).eq('id', bakery.id); onSaved() } },
+          ]}
+          onFinished={() => setTab('orders')}
+        />
+      ) : null}
+      {tab === 'payouts' ? <PayoutSetup onSaved={reloadPayout} summary={payout} /> : null}
       {error ? <Notice kind="error">{error}</Notice> : null}
       {tab === 'orders' ? (
         <div className="pt-stack">
@@ -297,10 +333,12 @@ function MenuEditor({ bakery, onSaved }) {
     const clean = items.filter((item) => item.title.trim()).map((item, index) => ({ id: item.id || `${bakery.id}-m${Date.now()}-${index}`, title: item.title.trim(), detail: (item.detail || '').trim(), price: Math.max(0, Number(item.price) || 0), leadHours: Number(item.leadHours) || 0 }))
     const problem = builderProblem(builder)
     if (problem) { setBusy(false); setError(problem); return }
-    const { error: err } = await supabase.from('bakeries').update({ builder: cleanBuilder(builder), menu: clean }).eq('id', bakery.id)
+    // The first time a newly approved bakery saves its options, the shop goes live for customers.
+    const goLive = !bakery.active && !bakery.went_live_at
+    const { error: err } = await supabase.from('bakeries').update({ builder: cleanBuilder(builder), menu: clean, ...(goLive ? { active: true, went_live_at: new Date().toISOString() } : {}) }).eq('id', bakery.id)
     setBusy(false)
     if (err) setError(friendlyError(err))
-    else { setMessage('Menu saved.'); setItems(clean); onSaved() }
+    else { setMessage(goLive ? 'Saved. Your shop is now live: customers can find it in the app.' : 'Menu saved.'); setItems(clean); onSaved() }
   }
 
   return (

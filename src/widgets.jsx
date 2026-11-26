@@ -355,3 +355,146 @@ export function PhoneInput({ value, onChange, onBlur, variant = 'pt', id, ...inp
     </div>
   )
 }
+
+/* ---------- Setup checklist after approval ---------- */
+
+export function SetupChecklist({ approvedAt, steps, onFinished }) {
+  const left = steps.filter((step) => !step.done).length
+  return (
+    <section className="pt-card pt-stack">
+      <div>
+        <h1 className="pt-h1">{left ? 'You’re approved! Let’s get you set up' : 'You’re all set'}</h1>
+        {approvedAt ? <p className="pt-muted">Approved {new Date(approvedAt).toLocaleDateString('en-CA', { timeZone: 'America/Vancouver', month: 'long', day: 'numeric', year: 'numeric' })}</p> : null}
+      </div>
+      <ol className="cx-steps">
+        {steps.map((step, index) => (
+          <li key={step.title} className={step.done ? 'is-done' : ''}>
+            <span className="cx-step-dot" aria-hidden="true">{step.done ? '✓' : index + 1}</span>
+            <div className="cx-step-body">
+              <strong>{step.title}</strong>
+              <span className="pt-muted pt-small">{step.done ? 'Done' : step.text}</span>
+              {!step.done && step.action ? <button type="button" className="pt-btn is-small" disabled={step.disabled} onClick={step.onClick}>{step.action}</button> : null}
+            </div>
+          </li>
+        ))}
+      </ol>
+      {!left && onFinished ? <button type="button" className="pt-btn" onClick={onFinished}>Go to my dashboard</button> : null}
+    </section>
+  )
+}
+
+/* ---------- Payouts: bank details + tax number, stored encrypted ---------- */
+
+export function sinProblem(raw) {
+  const digits = String(raw || '').replace(/\D/g, '')
+  if (!digits) return ''
+  if (digits.length !== 9) return 'A SIN has 9 digits.'
+  let sum = 0
+  for (let i = 0; i < 9; i += 1) {
+    let d = Number(digits[i]) * (i % 2 ? 2 : 1)
+    if (d > 9) d -= 9
+    sum += d
+  }
+  return sum % 10 === 0 && digits[0] !== '0' ? '' : 'That SIN isn’t valid. Check the number on your SIN letter.'
+}
+
+export function usePayoutSummary(userId) {
+  const [summary, setSummary] = useState(undefined)
+  const load = useCallback(async () => {
+    if (!userId) return
+    const { data } = await supabase.rpc('my_payout_summary')
+    setSummary(data || null)
+  }, [userId])
+  useEffect(() => { load() }, [load])
+  return [summary, load]
+}
+
+export function PayoutSetup({ summary, onSaved, allowBusinessNumber = true }) {
+  const [form, setForm] = useState({ holder: summary?.holder || '', institution: '', transit: '', account: '', taxKind: summary?.tax_kind || 'sin', taxId: '' })
+  const [editing, setEditing] = useState(!summary?.bank_last4)
+  const [showTax, setShowTax] = useState(false)
+  const [busy, setBusy] = useState(false)
+  const [error, setError] = useState('')
+  const [saved, setSaved] = useState('')
+  const set = (key, value) => setForm((current) => ({ ...current, [key]: value }))
+  const digits = (value, max) => value.replace(/\D/g, '').slice(0, max)
+  const hasTax = Boolean(summary?.tax_last3)
+  const taxError = form.taxKind === 'sin' ? sinProblem(form.taxId) : form.taxId && digits(form.taxId, 9).length !== 9 ? 'A business number starts with 9 digits.' : ''
+
+  async function save(event) {
+    event.preventDefault(); setError(''); setSaved('')
+    if (!form.holder.trim()) return setError('Add the account holder’s name.')
+    if (form.institution.length !== 3) return setError('The institution number has 3 digits.')
+    if (form.transit.length !== 5) return setError('The transit number has 5 digits.')
+    if (form.account.length < 5 || form.account.length > 12) return setError('The account number has 5 to 12 digits.')
+    if (!hasTax && !form.taxId) return setError(form.taxKind === 'sin' ? 'Add your Social Insurance Number.' : 'Add your business number.')
+    if (taxError) return setError(taxError)
+    setBusy(true)
+    const { error: err } = await supabase.rpc('save_payout_details', {
+      p_holder: form.holder.trim(), p_institution: form.institution, p_transit: form.transit, p_account: form.account,
+      p_tax_kind: form.taxKind, p_tax_id: form.taxId ? form.taxId.replace(/\D/g, '') : null,
+    })
+    setBusy(false)
+    if (err) return setError(friendlyError(err))
+    setForm((current) => ({ ...current, institution: '', transit: '', account: '', taxId: '' }))
+    setEditing(false); setSaved('Saved. Your details are encrypted.')
+    onSaved?.()
+  }
+
+  if (summary === undefined) return <p className="pt-muted" role="status">Loading…</p>
+  return (
+    <section className="pt-card pt-stack">
+      <h2 className="pt-h2">Payouts</h2>
+      <p className="pt-muted">We pay your earnings by direct deposit every week. Bank and tax numbers are encrypted before they’re stored and are never shown in full again, not even to you.</p>
+      {saved ? <Notice>{saved}</Notice> : null}
+      {summary?.bank_last4 && !editing ? (
+        <>
+          <dl className="pt-dl">
+            <dt>Account holder</dt><dd>{summary.holder}</dd>
+            <dt>Bank account</dt><dd>Institution {summary.institution} · ending in {summary.bank_last4}</dd>
+            <dt>{summary.tax_kind === 'bn' ? 'Business number' : 'SIN'}</dt><dd>ending in {summary.tax_last3}</dd>
+            <dt>Last updated</dt><dd>{new Date(summary.updated_at).toLocaleDateString('en-CA')}</dd>
+          </dl>
+          <button type="button" className="pt-btn is-ghost" onClick={() => setEditing(true)}>Change bank details</button>
+        </>
+      ) : (
+        <form className="pt-stack" onSubmit={save} noValidate>
+          <label className="pt-field"><span className="pt-label">Account holder name <span className="pt-req" aria-hidden="true">*</span></span><input className="pt-input" autoComplete="name" value={form.holder} onChange={(e) => set('holder', e.target.value)} /></label>
+          <div className="pt-grid-3">
+            <label className="pt-field"><span className="pt-label">Institution <span className="pt-req" aria-hidden="true">*</span></span><input className="pt-input" inputMode="numeric" autoComplete="off" placeholder="3 digits" value={form.institution} onChange={(e) => set('institution', digits(e.target.value, 3))} /></label>
+            <label className="pt-field"><span className="pt-label">Transit <span className="pt-req" aria-hidden="true">*</span></span><input className="pt-input" inputMode="numeric" autoComplete="off" placeholder="5 digits" value={form.transit} onChange={(e) => set('transit', digits(e.target.value, 5))} /></label>
+            <label className="pt-field"><span className="pt-label">Account <span className="pt-req" aria-hidden="true">*</span></span><input className="pt-input" inputMode="numeric" autoComplete="off" placeholder="7–12 digits" value={form.account} onChange={(e) => set('account', digits(e.target.value, 12))} /></label>
+          </div>
+          <p className="pt-small pt-muted">Find these on a void cheque or in your banking app under “direct deposit details”.</p>
+          {hasTax && !showTax ? (
+            <p className="pt-small">{summary.tax_kind === 'bn' ? 'Business number' : 'SIN'} on file, ending in {summary.tax_last3}. <button type="button" className="pt-link-btn" onClick={() => setShowTax(true)}>Change</button></p>
+          ) : (
+            <>
+              {allowBusinessNumber ? (
+                <label className="pt-field"><span className="pt-label">Tax number for your earnings</span>
+                  <select className="pt-input" value={form.taxKind} onChange={(e) => { set('taxKind', e.target.value); set('taxId', '') }}>
+                    <option value="sin">Social Insurance Number (sole proprietor)</option>
+                    <option value="bn">Business number (incorporated or registered business)</option>
+                  </select>
+                </label>
+              ) : null}
+              <label className="pt-field"><span className="pt-label">{form.taxKind === 'bn' ? 'Business number' : 'Social Insurance Number (SIN)'} <span className="pt-req" aria-hidden="true">*</span></span>
+                <input className="pt-input" type="password" inputMode="numeric" autoComplete="off" placeholder="9 digits" value={form.taxId} onChange={(e) => set('taxId', digits(e.target.value, 9))} />
+                {taxError ? <span className="pt-field-error" role="alert">{taxError}</span> : <span className="pt-hint">Required by the Canada Revenue Agency to report platform earnings. Hidden as you type.</span>}
+              </label>
+            </>
+          )}
+          {error ? <p className="pt-error" role="alert">{error}</p> : null}
+          <div className="pt-row pt-row-start">
+            <button type="submit" className="pt-btn" disabled={busy}>{busy ? 'Saving securely…' : 'Save payout details'}</button>
+            {summary?.bank_last4 ? <button type="button" className="pt-btn is-ghost" onClick={() => setEditing(false)}>Cancel</button> : null}
+          </div>
+        </form>
+      )}
+    </section>
+  )
+}
+
+function Notice({ children }) {
+  return <p className="cx-notice" role="status">{children}</p>
+}

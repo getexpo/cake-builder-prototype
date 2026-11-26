@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useState } from 'react'
 import { friendlyError, supabase, uploadDocument } from './supabaseClient.js'
-import { BC_AREAS, Badge, Check, Field, FileField, Loading, Notice, Shell, SignInScreen, money, useAccountGate, useSession, when } from './partnerShared.jsx'
-import { PhoneInput, PhoneVerify } from './widgets.jsx'
+import { BC_AREAS, Badge, Check, Field, FileField, Loading, Notice, Shell, SignInScreen, WorkEligibility, eligibilityDocs, eligibilityMissing, money, useAccountGate, useSession, when } from './partnerShared.jsx'
+import { PayoutSetup, PhoneInput, PhoneVerify, SetupChecklist, usePayoutSummary } from './widgets.jsx'
 import { MAKES, VEHICLES, joinVehicle, splitVehicle } from './vehicles.js'
 import { expiryProblem, licenceProblem, phoneProblem, yearProblem } from './validate.js'
 
@@ -66,6 +66,12 @@ function DriverHome({ user }) {
   }, [user.id])
 
   useEffect(() => { load() }, [load])
+  // While waiting for review, check every 20 seconds so approval shows up on its own.
+  useEffect(() => {
+    if (application?.status !== 'pending' || editing) return undefined
+    const timer = setInterval(load, 20000)
+    return () => clearInterval(timer)
+  }, [application?.status, editing, load])
 
   if (application === undefined) return <Loading title={TITLE} />
   if (!application || editing) {
@@ -82,12 +88,14 @@ function DriverHome({ user }) {
         <section className="pt-card pt-stack">
           <div className="pt-row"><h1 className="pt-h1">Your application</h1><Badge status={application.status} /></div>
           {application.status === 'pending' ? <p>Thanks, {application.full_name.split(' ')[0]}. We’re checking your documents. We’ll email you at {application.email || user.email} when you’re approved, usually within 2 business days.</p> : null}
-          {application.status === 'rejected' ? <><p>We couldn’t approve your application yet.</p>{application.review_note ? <Notice kind="error">{application.review_note}</Notice> : null}<button type="button" className="pt-btn" onClick={() => setEditing(true)}>Update and resubmit</button></> : null}
-          {application.status === 'suspended' ? <p>Your account is paused. Contact support to find out more.</p> : null}
+          {application.status === 'pending' ? <p className="pt-muted pt-small">This page updates on its own when we’ve reviewed it.</p> : null}
+          {application.status === 'rejected' ? <><p>We couldn’t approve your application{application.reviewed_at ? ` (reviewed ${when(application.reviewed_at)})` : ''}.</p><Notice kind="error"><strong>Reason:</strong> {application.review_note || 'No reason was given. Message us from the customer app’s Help page and we’ll explain.'}</Notice><button type="button" className="pt-btn" onClick={() => setEditing(true)}>Fix and resubmit</button></> : null}
+          {application.status === 'suspended' ? <><p>Your account is paused. Contact support to find out more.</p>{application.review_note ? <Notice kind="error"><strong>Reason:</strong> {application.review_note}</Notice> : null}</> : null}
           <dl className="pt-dl">
             <dt>Area</dt><dd>{application.city}</dd>
             <dt>Vehicle</dt><dd>{[application.vehicle_year, application.vehicle_make_model, application.vehicle_type].filter(Boolean).join(' ')}</dd>
             <dt>Submitted</dt><dd>{when(application.created_at)}</dd>
+            {application.reviewed_at && application.status !== 'pending' ? <><dt>{application.status === 'rejected' ? 'Not approved' : 'Updated'}</dt><dd>{when(application.reviewed_at)}</dd></> : null}
           </dl>
           {application.status === 'pending' ? <button type="button" className="pt-btn is-ghost" onClick={() => setEditing(true)}>Edit my application</button> : null}
         </section>
@@ -98,7 +106,7 @@ function DriverHome({ user }) {
 }
 
 function DriverForm({ user, existing, onDone }) {
-  const [form, setForm] = useState(() => ({ ...EMPTY_FORM, ...(existing || {}), full_name: existing?.full_name || user.user_metadata?.full_name || '', vehicle_year: existing?.vehicle_year || '', licence_expiry: existing?.licence_expiry || '' }))
+  const [form, setForm] = useState(() => ({ ...EMPTY_FORM, ...(existing || {}), full_name: existing?.full_name || user.user_metadata?.full_name || '', vehicle_year: existing?.vehicle_year || '', licence_expiry: existing?.licence_expiry || '', immigration_status: existing?.immigration_status || '', permit_expiry: existing?.permit_expiry || '' }))
   const [files, setFiles] = useState({})
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState('')
@@ -136,6 +144,7 @@ function DriverForm({ user, existing, onDone }) {
     !form.insurance_confirmed && 'confirmation your insurance covers deliveries',
     !form.background_check_consent && 'consent to a background check',
     ...DOCS.filter((doc) => doc.required && !haveDoc(doc.id)).map((doc) => doc.label.toLowerCase()),
+    ...eligibilityMissing(form, haveDoc, today),
   ].filter(Boolean)
 
   async function submit(event) {
@@ -144,12 +153,14 @@ function DriverForm({ user, existing, onDone }) {
     setBusy(true); setError('')
     try {
       const documents = { ...(existing?.documents || {}) }
-      for (const doc of DOCS) {
+      for (const doc of [...DOCS, ...eligibilityDocs(form.immigration_status)]) {
         if (files[doc.id]) documents[doc.id] = await uploadDocument(user.id, doc.id, files[doc.id])
       }
       const row = {
         user_id: user.id,
         status: 'pending',
+        immigration_status: form.immigration_status,
+        permit_expiry: form.permit_expiry || null,
         email: user.email,
         full_name: form.full_name.trim(),
         phone: form.phone.trim(),
@@ -246,6 +257,8 @@ function DriverForm({ user, existing, onDone }) {
         <Check checked={form.has_ac} onChange={(v) => set('has_ac', v)}>My vehicle has working air conditioning.</Check>
       </section>
 
+      <WorkEligibility form={form} set={set} files={files} setFiles={setFiles} today={today} />
+
       <section className="pt-card pt-stack">
         <h2 className="pt-h2">Documents</h2>
         <p className="pt-muted">Stored privately. Only our review team can see them.</p>
@@ -266,7 +279,10 @@ function DriverForm({ user, existing, onDone }) {
 }
 
 function DriverWork({ user, application }) {
+  const [payout, reloadPayout] = usePayoutSummary(user.id)
   const [tab, setTab] = useState('jobs')
+  const needsPayout = payout !== undefined && !payout?.bank_last4
+  useEffect(() => { if (needsPayout) setTab('setup') }, [needsPayout])
   const [open, setOpen] = useState([])
   const [mine, setMine] = useState([])
   const [error, setError] = useState('')
@@ -300,14 +316,28 @@ function DriverWork({ user, application }) {
   }
 
   const tabs = [
+    ...(needsPayout ? [{ id: 'setup', label: 'Get started', count: 1 }] : []),
     { id: 'jobs', label: 'Jobs', count: open.length },
     { id: 'current', label: 'Current', count: current ? 1 : 0 },
     { id: 'earnings', label: 'Earnings' },
+    { id: 'payouts', label: 'Payouts' },
   ]
 
   return (
     <Shell title={TITLE} user={user} tabs={tabs} tab={tab} onTab={setTab} subtitle={`Signed in as ${application.full_name} · ${application.city}`}>
       {error ? <Notice kind="error">{error}</Notice> : null}
+      {tab === 'setup' ? (
+        <SetupChecklist
+          approvedAt={application.reviewed_at}
+          steps={[
+            { done: true, title: 'Application approved', text: '' },
+            { done: !needsPayout, title: 'Add your bank details for payouts', text: 'We pay you by direct deposit every week. Needed before you can accept jobs.', action: 'Add bank details', onClick: () => setTab('payouts') },
+          ]}
+          onFinished={() => setTab('jobs')}
+        />
+      ) : null}
+      {tab === 'payouts' ? <PayoutSetup summary={payout} allowBusinessNumber={false} onSaved={async () => { await reloadPayout(); setTab('jobs') }} /> : null}
+      {tab === 'jobs' && needsPayout ? <Notice>Add your bank details to start accepting jobs. <button type="button" className="pt-link-btn" onClick={() => setTab('payouts')}>Add them now</button></Notice> : null}
       {tab === 'jobs' ? (
         <div className="pt-stack">
           {current ? <Notice>You have a delivery in progress. Finish it before taking another.</Notice> : null}
@@ -318,7 +348,7 @@ function DriverWork({ user, application }) {
               <span className="pt-muted pt-small">{money(order.driver_pay)} delivery pay{Number(order.tip) ? ` + ${money(order.tip)} tip` : ''}</span>
               <Route order={order} />
               <span className="pt-small">Ready {order.ready_window || when(order.ready_at)} · {(order.items || []).length} item{(order.items || []).length === 1 ? '' : 's'}</span>
-              <button type="button" className="pt-btn" disabled={Boolean(current) || busyId === order.id} onClick={() => act(order.id, 'driver_accept_job', { p_order: order.id })}>{busyId === order.id ? 'Accepting…' : 'Accept job'}</button>
+              <button type="button" className="pt-btn" disabled={Boolean(current) || needsPayout || busyId === order.id} onClick={() => act(order.id, 'driver_accept_job', { p_order: order.id })}>{busyId === order.id ? 'Accepting…' : 'Accept job'}</button>
             </article>
           ))}
         </div>

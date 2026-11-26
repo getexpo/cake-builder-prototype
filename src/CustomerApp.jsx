@@ -39,7 +39,73 @@ const DETAILS_KEY = 'cake-customer-details'
 const DELIVERY_FEE = 7.99
 const SERVICE_FEE = 2.49
 const DRIVER_PAY = 8
-const TIP_OPTIONS = [0, 2, 4, 6]
+const TIP_PRESETS = ['15', '20']
+const round2 = (n) => Math.round(n * 100) / 100
+
+// choice = { mode: '15' | '20' | 'custom' | 'later' | 'none', kind: '%' | '$', amount: '' }
+function tipAmount(choice, base) {
+  if (!choice || choice.mode === 'later' || choice.mode === 'none') return 0
+  if (choice.mode === 'custom') {
+    const value = Math.max(0, Number(choice.amount) || 0)
+    return round2(choice.kind === '%' ? (base * Math.min(value, 100)) / 100 : Math.min(value, 500))
+  }
+  return round2((base * Number(choice.mode)) / 100)
+}
+
+function TipPicker({ value, onChange, base, laterOption }) {
+  const set = (patch) => onChange({ ...value, ...patch })
+  const options = [...TIP_PRESETS.map((pct) => ({ id: pct, top: `${pct}%`, sub: money(round2((base * Number(pct)) / 100)) })), { id: 'custom', top: 'Custom', sub: '% or $' }, laterOption ? { id: 'later', top: 'Later', sub: 'After delivery' } : { id: 'none', top: 'No tip', sub: '' }]
+  return (
+    <div className="ca-stack-8">
+      <div className="ca-grid-4" role="radiogroup" aria-label="Tip amount">
+        {options.map((option) => (
+          <button key={option.id} type="button" role="radio" aria-checked={value.mode === option.id} className={`ca-size ${value.mode === option.id ? 'is-selected' : ''}`} onClick={() => set({ mode: option.id })}>
+            <strong className="ca-small-strong">{option.top}</strong>{option.sub ? <span className="ca-small">{option.sub}</span> : null}
+          </button>
+        ))}
+      </div>
+      {value.mode === 'custom' ? (
+        <div className="ca-tip-custom">
+          <div className="ca-seg" role="radiogroup" aria-label="Tip as a percent or dollar amount">
+            {['%', '$'].map((kind) => <button key={kind} type="button" role="radio" aria-checked={value.kind === kind} className={value.kind === kind ? 'is-on' : ''} onClick={() => set({ kind, amount: '' })}>{kind === '%' ? '% of order' : '$ amount'}</button>)}
+          </div>
+          <div className="ca-tip-input">
+            {value.kind === '$' ? <span aria-hidden="true">$</span> : null}
+            <input className="ca-input" inputMode="decimal" aria-label={value.kind === '%' ? 'Tip percent' : 'Tip in dollars'} placeholder={value.kind === '%' ? '18' : '5.00'} value={value.amount} onChange={(event) => set({ amount: event.target.value.replace(/[^\d.]/g, '').slice(0, 6) })} />
+            {value.kind === '%' ? <span aria-hidden="true">%</span> : null}
+            <strong>= {money(tipAmount(value, base))}</strong>
+          </div>
+        </div>
+      ) : null}
+    </div>
+  )
+}
+
+// Asks for a tip once a delivery has arrived. 100% goes to the driver.
+function TipAfterDelivery({ order, onDone, onSkip, compact }) {
+  const [choice, setChoice] = useState({ mode: '15', kind: '%', amount: '' })
+  const [busy, setBusy] = useState(false)
+  const [error, setError] = useState('')
+  const base = Number(order.subtotal) || 0
+  const amount = tipAmount(choice, base)
+  const driver = order.driver_name ? order.driver_name.split(' ')[0] : 'your driver'
+  async function send() {
+    if (!amount) { onSkip(); return }
+    setBusy(true); setError('')
+    const { error: err } = await supabase.rpc('add_driver_tip', { p_order: order.id, p_tip: amount })
+    setBusy(false)
+    if (err) setError(friendlyError(err)); else onDone(amount)
+  }
+  return (
+    <div className="ca-stack-12">
+      {!compact ? <h2 className="ca-h3">Tip {driver}</h2> : null}
+      <TipPicker value={choice} onChange={setChoice} base={base} />
+      <span className="ca-muted ca-small">100% of your tip goes to {driver}. It’s charged to the card you paid with.</span>
+      {error ? <p className="ca-toast is-error is-inline" role="alert">{error}</p> : null}
+      <button type="button" className="ca-btn" disabled={busy} onClick={send}>{busy ? 'Adding tip…' : amount ? `Add ${money(amount)} tip` : 'No tip this time'}</button>
+    </div>
+  )
+}
 
 function readDetails() {
   try {
@@ -387,7 +453,7 @@ export default function CustomerApp({ ctx }) {
   const [origin, setOrigin] = useState(null) // { lat, lng, label }
   const [locating, setLocating] = useState(false)
   const [pickedLocation, setPickedLocation] = useState(() => { try { return JSON.parse(window.localStorage.getItem('picked-location') || '{}') } catch { return {} } })
-  const [checkout, setCheckout] = useState({ times: {}, addressId: '', line1: '', city: 'Vancouver', instructions: '', phone: '', tip: 4, notes: '', cardId: '', cardName: '', cardLast4: '', placing: false, error: '' })
+  const [checkout, setCheckout] = useState({ times: {}, addressId: '', line1: '', city: 'Vancouver', instructions: '', phone: '', tip: { mode: '15', kind: '%', amount: '' }, notes: '', cardId: '', cardName: '', cardLast4: '', placing: false, error: '' })
   const [build, setBuild] = useState(() => newBuild(SHOPS.find((item) => item.id === customerShopId) || SHOPS[0]))
   const [custom, setCustom] = useState(() => newCustom(SHOPS.find((item) => item.id === customerShopId) || SHOPS[0]))
   const [category, setCategory] = useState('all')
@@ -413,11 +479,21 @@ export default function CustomerApp({ ctx }) {
     const delivery = subtotal && ctx.fulfillmentType === 'delivery' ? DELIVERY_FEE : 0
     const service = subtotal ? SERVICE_FEE : 0
     const tax = Math.round((subtotal + delivery + service) * 0.05 * 100) / 100
-    const tip = ctx.fulfillmentType === 'delivery' ? Number(checkout.tip) || 0 : 0
+    const tip = ctx.fulfillmentType === 'delivery' ? tipAmount(checkout.tip, subtotal) : 0
     return { subtotal, delivery, service, tax, tip, total: Math.round((subtotal + delivery + service + tax + tip) * 100) / 100 }
   }, [cart, ctx.fulfillmentType, checkout.tip])
 
   const signedIn = Boolean(sbUser)
+
+  // After a delivery arrives, ask once for a tip if none was added at checkout.
+  const [tipDismissed, setTipDismissed] = useState(() => { try { return JSON.parse(window.localStorage.getItem('tip-dismissed') || '[]') } catch { return [] } })
+  function dismissTip(id) {
+    const next = [...new Set([...tipDismissed, id])].slice(-100)
+    setTipDismissed(next)
+    try { window.localStorage.setItem('tip-dismissed', JSON.stringify(next)) } catch { /* ignore */ }
+  }
+  const needsTip = (order) => order.fulfillment === 'delivery' && order.status === 'delivered' && !Number(order.tip) && !order.tip_added_at && !tipDismissed.includes(order.id)
+  const tipPromptOrder = signedIn ? myOrders.find((order) => needsTip(order) && Date.now() - new Date(order.ready_at || order.created_at).getTime() < 7 * 86400000) : null
   const cartShop = cart.length ? bakeries.find((item) => item.id === cart[0].shopId) : null
   const [conversations, loadConversations] = useConversations(sbUser ? { customerId: sbUser.id } : null, Boolean(sbUser))
   const occasionData = useOccasions(sbUser)
@@ -1250,7 +1326,6 @@ export default function CustomerApp({ ctx }) {
     const savedCard = details.cards.find((item) => item.id === checkout.cardId)
     const card = savedCard || { name: checkout.cardName.trim(), last4: checkout.cardLast4 }
     const phone = (checkout.phone || details.phone || '').trim()
-    const tipEach = delivery ? Number(checkout.tip) || 0 : 0
 
     // One order per date.
     const groups = [...new Set(cart.map((item) => item.date || ''))].sort().map((date) => {
@@ -1261,8 +1336,9 @@ export default function CustomerApp({ ctx }) {
       const subtotal = items.reduce((sum, item) => sum + (item.unitPrice ?? item.totalPrice ?? 0) * (item.quantity || 1), 0)
       const deliveryFee = delivery ? DELIVERY_FEE : 0
       const tax = Math.round((subtotal + deliveryFee + SERVICE_FEE) * 0.05 * 100) / 100
-      const total = Math.round((subtotal + deliveryFee + SERVICE_FEE + tax + tipEach) * 100) / 100
-      return { date, items, times, time, subtotal, deliveryFee, service: SERVICE_FEE, tax, tip: tipEach, total }
+      const tip = delivery ? tipAmount(checkout.tip, subtotal) : 0
+      const total = Math.round((subtotal + deliveryFee + SERVICE_FEE + tax + tip) * 100) / 100
+      return { date, items, times, time, subtotal, deliveryFee, service: SERVICE_FEE, tax, tip, total }
     })
     const sum = (key) => Math.round(groups.reduce((acc, group) => acc + group[key], 0) * 100) / 100
     const many = groups.length > 1
@@ -1444,14 +1520,8 @@ export default function CustomerApp({ ctx }) {
           {delivery ? (
             <section className="ca-stack-8">
               <h2 className="ca-h3">Tip your driver</h2>
-              <div className="ca-grid-4">
-                {TIP_OPTIONS.map((amount) => (
-                  <button key={amount} type="button" aria-pressed={Number(checkout.tip) === amount} className={`ca-size ${Number(checkout.tip) === amount ? 'is-selected' : ''}`} onClick={() => setC({ tip: amount })}>
-                    <strong className="ca-small-strong">{amount ? money(amount) : 'None'}</strong>
-                  </button>
-                ))}
-              </div>
-              <span className="ca-muted ca-small">100% of your tip goes to the driver.</span>
+              <TipPicker value={checkout.tip} onChange={(tip) => setC({ tip })} base={sum('subtotal')} laterOption />
+              <span className="ca-muted ca-small">{checkout.tip.mode === 'later' ? 'We’ll ask you after your cake arrives. ' : ''}100% of your tip goes to the driver.</span>
             </section>
           ) : null}
 
@@ -1478,7 +1548,7 @@ export default function CustomerApp({ ctx }) {
             {delivery ? <><dt>Delivery fee{many ? ` × ${groups.length}` : ''}</dt><dd>{money(sum('deliveryFee'))}</dd></> : null}
             <dt>Service fee{many ? ` × ${groups.length}` : ''}</dt><dd>{money(sum('service'))}</dd>
             <dt>GST</dt><dd>{money(sum('tax'))}</dd>
-            {tipEach ? <><dt>Driver tip{many ? ` × ${groups.length}` : ''}</dt><dd>{money(sum('tip'))}</dd></> : null}
+            {sum('tip') ? <><dt>Driver tip{many && checkout.tip.mode === 'custom' && checkout.tip.kind === '$' ? ` × ${groups.length}` : ''}</dt><dd>{money(sum('tip'))}</dd></> : null}
             <dt className="ca-total">Total</dt><dd className="ca-total">{money(sum('total'))}</dd>
           </dl>
           {checkout.error ? <p className="ca-toast is-error is-inline" role="alert">{checkout.error}</p> : null}
@@ -1532,6 +1602,8 @@ export default function CustomerApp({ ctx }) {
             {order.fulfillment === 'delivery' && order.dropoff ? <span className="ca-muted">To {order.dropoff.line1}, {order.dropoff.city}</span> : null}
             {order.fulfillment === 'pickup' ? <span className="ca-muted">Pick up at {[order.bakery_address, order.bakery_area].filter(Boolean).join(', ')}</span> : null}
           </div>
+          {needsTip(order) ? <div className="ca-tip-card"><TipAfterDelivery order={order} onDone={() => { dismissTip(order.id); loadOrders() }} onSkip={() => dismissTip(order.id)} /></div> : null}
+          {order.tip_added_at && Number(order.tip) ? <p className="ca-muted ca-small">You tipped {money(order.tip)}. Thank you!</p> : null}
           <button type="button" className="ca-btn ca-btn-ghost" onClick={() => openChat({ id: order.bakery_id, name: order.bakery_name }, view)}><Icon name="chat" size={18} />Message {order.bakery_name}</button>
           {status === 'new' ? <button type="button" className="ca-btn ca-btn-ghost" onClick={cancel}>Cancel order</button> : null}
           <button type="button" className="ca-btn ca-btn-ghost" onClick={() => { setAccountPage('help'); go('account'); setAccountPage('help') }}><Icon name="help" size={18} />Get help with this order</button>
@@ -1811,6 +1883,16 @@ export default function CustomerApp({ ctx }) {
         {renderToast()}
         {screen}
         {showNav ? <BottomNav view={view} go={go} cartCount={cartCount} unread={unreadMessages} /> : null}
+        {tipPromptOrder && !pendingItem && !(view === 'orders' && openOrderId === tipPromptOrder.id) ? (
+          <div className="ca-modal-backdrop" role="dialog" aria-modal="true" aria-labelledby="ca-tip-title">
+            <div className="ca-modal">
+              <h2 id="ca-tip-title" className="ca-h2">Your cake was delivered!</h2>
+              <p className="ca-muted ca-lh">{tipPromptOrder.bakery_name} · Order #{String(tipPromptOrder.id).slice(0, 6).toUpperCase()}. Want to thank {tipPromptOrder.driver_name ? tipPromptOrder.driver_name.split(' ')[0] : 'your driver'} with a tip?</p>
+              <TipAfterDelivery compact order={tipPromptOrder} onDone={() => { dismissTip(tipPromptOrder.id); loadOrders() }} onSkip={() => dismissTip(tipPromptOrder.id)} />
+              <button type="button" className="ca-link ca-center" onClick={() => dismissTip(tipPromptOrder.id)}>Not now</button>
+            </div>
+          </div>
+        ) : null}
         {pendingItem ? (
           <div className="ca-modal-backdrop" role="dialog" aria-modal="true" aria-labelledby="ca-newcart-title">
             <div className="ca-modal">

@@ -86,7 +86,7 @@ export function Shell({ title, subtitle, user, tabs, tab, onTab, children, wide 
       <header className="pt-top">
         <div className="pt-top-inner">
           <a href="/" className="pt-brand" aria-label="Back to the customer app"><span className="pt-logo" aria-hidden="true">🎂</span><span>{title}</span></a>
-          {user ? <button type="button" className="pt-link-btn" onClick={signOut}>Sign out</button> : null}
+          {user ? <span className="pt-who"><span className="pt-who-email" title={user.email}>{user.email}</span><button type="button" className="pt-link-btn" onClick={signOut}>Sign out</button></span> : null}
         </div>
         {tabs ? (
           <nav className="pt-tabs" aria-label={`${title} sections`}>
@@ -245,5 +245,61 @@ export function LocationsEditor({ locations, onChange, newLocation }) {
       })}
       <button type="button" className="pt-btn is-ghost" onClick={() => onChange([...list, newLocation()])}>+ Add another location</button>
     </div>
+  )
+}
+
+/* ---------- Work eligibility (immigration status + proof) ---------- */
+
+export const IMMIGRATION_STATUSES = [
+  { id: 'citizen', label: 'Canadian citizen' },
+  { id: 'pr', label: 'Permanent resident' },
+  { id: 'work', label: 'Work permit' },
+  { id: 'study', label: 'Study permit (student)' },
+]
+
+export function eligibilityDocs(status) {
+  if (status === 'citizen') return [{ id: 'birth_certificate', label: 'Birth certificate', required: true, hint: 'A clear photo or PDF. A Canadian passport photo page also works.' }]
+  if (status === 'pr') return [
+    { id: 'pr_card_front', label: 'PR card (front)', required: true },
+    { id: 'pr_card_back', label: 'PR card (back)', required: true },
+  ]
+  if (status === 'work') return [{ id: 'work_permit', label: 'Work permit', required: true, hint: 'All pages that show your name, conditions and expiry date.' }]
+  if (status === 'study') return [{ id: 'study_permit', label: 'Study permit', required: true, hint: 'Shows whether you may work off campus.' }]
+  return []
+}
+
+export const needsPermitExpiry = (status) => status === 'work' || status === 'study'
+
+export function eligibilityMissing(form, haveDoc, today) {
+  if (!form.immigration_status) return ['your status in Canada']
+  const missing = eligibilityDocs(form.immigration_status).filter((doc) => !haveDoc(doc.id)).map((doc) => `a copy of your ${doc.label.toLowerCase()}`)
+  if (needsPermitExpiry(form.immigration_status)) {
+    if (!form.permit_expiry) missing.push('your permit expiry date')
+    else if (form.permit_expiry <= today) missing.push('a permit that hasn’t expired')
+  }
+  return missing
+}
+
+export function WorkEligibility({ form, set, files, setFiles, today }) {
+  const status = form.immigration_status || ''
+  return (
+    <section className="pt-card pt-stack">
+      <h2 className="pt-h2">Your status in Canada</h2>
+      <p className="pt-muted">We have to confirm you’re allowed to work in Canada. Your documents are stored privately and only our review team can see them.</p>
+      <Field label="Status" required>
+        <select className="pt-input" value={status} onChange={(e) => set('immigration_status', e.target.value)}>
+          <option value="" disabled>Choose your status</option>
+          {IMMIGRATION_STATUSES.map((item) => <option key={item.id} value={item.id}>{item.label}</option>)}
+        </select>
+      </Field>
+      {needsPermitExpiry(status) ? (
+        <Field label="Permit expiry date" required error={form.permit_expiry && form.permit_expiry <= today ? 'This permit has expired.' : ''}>
+          <input className="pt-input" type="date" min={today} value={form.permit_expiry || ''} onChange={(e) => set('permit_expiry', e.target.value)} />
+        </Field>
+      ) : null}
+      {eligibilityDocs(status).map((doc) => (
+        <FileField key={doc.id} label={doc.label} hint={doc.hint} required={doc.required} value={files[doc.id]} onChange={(file) => setFiles((current) => ({ ...current, [doc.id]: file }))} />
+      ))}
+    </section>
   )
 }

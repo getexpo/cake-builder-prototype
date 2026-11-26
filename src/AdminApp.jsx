@@ -1,7 +1,7 @@
 import { Fragment, useCallback, useEffect, useState } from 'react'
 import { CATEGORIES } from './catalog.js'
 import { documentUrl, friendlyError, supabase } from './supabaseClient.js'
-import { Badge, Loading, Notice, Shell, SignInScreen, money, useAccountGate, useSession, when } from './partnerShared.jsx'
+import { Badge, IMMIGRATION_STATUSES, Loading, Notice, Shell, SignInScreen, money, useAccountGate, useSession, when } from './partnerShared.jsx'
 import { ChatThread, ConversationList, useConversations } from './widgets.jsx'
 
 const TITLE = 'Admin'
@@ -136,6 +136,9 @@ function Review({ kind, row, shop, onChanged }) {
         ['Food permit #', row.food_permit_number || '—'],
         ['Live shop', shop ? `${shop.id} · ${shop.active ? 'visible to customers' : 'hidden until they publish'}` : 'Created when approved'],
       ]
+  const status = IMMIGRATION_STATUSES.find((item) => item.id === row.immigration_status)?.label
+  details.push(['Status in Canada', status ? `${status}${row.permit_expiry ? ` · permit expires ${row.permit_expiry}` : ''}` : 'Not given (older application)'])
+  if (row.reviewed_at) details.push([row.status === 'approved' ? 'Approved' : row.status === 'rejected' ? 'Rejected' : 'Last reviewed', when(row.reviewed_at)])
   const docs = Object.entries(row.documents || {})
 
   return (
@@ -148,6 +151,7 @@ function Review({ kind, row, shop, onChanged }) {
           {docs.map(([id, doc]) => <button key={id} type="button" className="pt-btn is-ghost" onClick={() => openDoc(doc.path)}>Open {id.replace(/_/g, ' ')}</button>)}
         </div>
       </div>
+      {row.status === 'approved' ? <PayoutAdmin userId={row.user_id} /> : null}
       <label className="pt-field"><span className="pt-label">Note to applicant</span><textarea className="pt-input" rows={2} value={note} onChange={(e) => setNote(e.target.value)} placeholder="Required when rejecting, e.g. “Insurance document is expired.”" /></label>
       {error ? <Notice kind="error">{error}</Notice> : null}
       <div className="pt-actions">
@@ -155,6 +159,46 @@ function Review({ kind, row, shop, onChanged }) {
         {row.status !== 'rejected' ? <button type="button" className="pt-btn is-ghost" disabled={busy} onClick={() => decide('rejected')}>Reject</button> : null}
         {row.status === 'approved' ? <button type="button" className="pt-btn is-ghost" disabled={busy} onClick={() => decide('suspended')}>Suspend</button> : null}
       </div>
+    </div>
+  )
+}
+
+// Bank and tax numbers are masked; showing them in full needs a reason and is logged.
+function PayoutAdmin({ userId }) {
+  const [summary, setSummary] = useState(undefined)
+  const [full, setFull] = useState(null)
+  const [reason, setReason] = useState('')
+  const [error, setError] = useState('')
+  useEffect(() => {
+    supabase.rpc('admin_payout_summary', { p_user: userId }).then(({ data, error: err }) => { if (err) setError(friendlyError(err)); setSummary(data || null) })
+  }, [userId])
+  async function reveal() {
+    setError('')
+    const { data, error: err } = await supabase.rpc('admin_reveal_payout', { p_user: userId, p_reason: reason })
+    if (err) setError(friendlyError(err)); else setFull(data)
+  }
+  if (summary === undefined) return null
+  return (
+    <div className="pt-stack">
+      <strong>Payout details</strong>
+      {!summary ? <span className="pt-muted">Not added yet. They’re asked for these in their portal after approval.</span> : (
+        <>
+          <span>{summary.holder} · institution {summary.institution} · account ending {summary.bank_last4} · {summary.tax_kind === 'bn' ? 'BN' : 'SIN'} ending {summary.tax_last3}</span>
+          {full ? (
+            <dl className="pt-dl">
+              <dt>Institution / transit</dt><dd>{full.institution} / {full.transit}</dd>
+              <dt>Account</dt><dd>{full.account}</dd>
+              <dt>{full.tax_kind === 'bn' ? 'Business number' : 'SIN'}</dt><dd>{full.tax_id}</dd>
+            </dl>
+          ) : (
+            <div className="pt-row pt-row-start pt-wrap">
+              <input className="pt-input pt-search" placeholder="Reason, e.g. weekly payout" value={reason} onChange={(e) => setReason(e.target.value)} />
+              <button type="button" className="pt-btn is-ghost is-small" disabled={!reason.trim()} onClick={reveal}>Show full numbers</button>
+            </div>
+          )}
+        </>
+      )}
+      {error ? <Notice kind="error">{error}</Notice> : null}
     </div>
   )
 }
