@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState } from 'react'
-import { friendlyError, supabase, uploadDocument } from './supabaseClient.js'
-import { BC_AREAS, Badge, Check, Field, FileField, Loading, Notice, Shell, SignInScreen, WorkEligibility, eligibilityDocs, eligibilityMissing, money, useAccountGate, useSession, when } from './partnerShared.jsx'
+import { documentUrl, friendlyError, supabase, uploadDocument } from './supabaseClient.js'
+import { BC_AREAS, Badge, Check, Field, FileField, IMMIGRATION_STATUSES, Loading, Notice, Shell, SignInScreen, WorkEligibility, eligibilityDocs, eligibilityMissing, money, useAccountGate, useSession, when } from './partnerShared.jsx'
 import { NotificationGate, PayoutSetup, PhoneInput, PhoneVerify, SetupChecklist, usePayoutSummary } from './widgets.jsx'
 import { MAKES, VEHICLES, joinVehicle, splitVehicle } from './vehicles.js'
 import { expiryProblem, licenceProblem, phoneProblem, yearProblem } from './validate.js'
@@ -104,10 +104,11 @@ function DriverHome({ user }) {
           </dl>
           {application.status === 'pending' ? <button type="button" className="pt-btn is-ghost" onClick={() => setEditing(true)}>Edit my application</button> : null}
         </section>
+        <DriverProfile application={application} onChanged={load} />
       </Shell>
     )
   }
-  return <DriverWork user={user} application={application} />
+  return <DriverWork user={user} application={application} onChanged={load} />
 }
 
 function DriverForm({ user, existing, onDone }) {
@@ -123,6 +124,8 @@ function DriverForm({ user, existing, onDone }) {
   const [phoneOk, setPhoneOk] = useState(false)
   const licenceError = licenceProblem(form.licence_number)
   const expiryError = expiryProblem(form.licence_expiry, today)
+  const [expiryConfirm, setExpiryConfirm] = useState(existing?.licence_expiry || '')
+  const confirmError = form.licence_expiry && expiryConfirm && expiryConfirm !== form.licence_expiry ? 'The two dates don’t match. Check the date printed on your licence.' : ''
   const yearError = yearProblem(form.vehicle_year, thisYear)
   const [car, setCar] = useState(() => splitVehicle(existing?.vehicle_make_model))
   const setCarPart = (patch) => setCar((current) => {
@@ -138,6 +141,7 @@ function DriverForm({ user, existing, onDone }) {
     form.phone.trim() && !phoneProblem(form.phone) && !phoneOk && 'a verified phone number (tap “Text me a code”)',
     licenceError && 'a valid licence number',
     expiryError && 'a licence that hasn’t expired',
+    form.licence_expiry && expiryConfirm !== form.licence_expiry && 'the licence expiry date a second time (both dates must match)',
     yearError && 'a valid vehicle year',
     !form.over_19 && 'confirmation you are 19 or older',
     !form.licence_number.trim() && 'your licence number',
@@ -219,6 +223,9 @@ function DriverForm({ user, existing, onDone }) {
           </Field>
           <Field label="Expiry date" required error={expiryError}><input className="pt-input" type="date" min={today} value={form.licence_expiry} onChange={(e) => set('licence_expiry', e.target.value)} /></Field>
         </div>
+        <Field label="Confirm expiry date" required error={confirmError} hint="Enter the expiry date again, exactly as printed on your licence. We remind you before it expires.">
+          <input className="pt-input" type="date" min={today} value={expiryConfirm} onChange={(e) => setExpiryConfirm(e.target.value)} onPaste={(e) => e.preventDefault()} />
+        </Field>
         <Field label="Licence number" required error={licenceError} hint="7 digits, on the front of your BC licence."><input className="pt-input" inputMode="numeric" maxLength={9} value={form.licence_number} onChange={(e) => set('licence_number', e.target.value.replace(/[^\d\s-]/g, ''))} /></Field>
       </section>
 
@@ -283,7 +290,7 @@ function DriverForm({ user, existing, onDone }) {
   )
 }
 
-function DriverWork({ user, application }) {
+function DriverWork({ user, application, onChanged }) {
   const [payout, reloadPayout] = usePayoutSummary(user.id)
   const [tab, setTab] = useState('jobs')
   const needsPayout = payout !== undefined && !payout?.bank_last4
@@ -326,7 +333,9 @@ function DriverWork({ user, application }) {
     { id: 'current', label: 'Current', count: current ? 1 : 0 },
     { id: 'earnings', label: 'Earnings' },
     { id: 'payouts', label: 'Payouts' },
+    { id: 'profile', label: 'My profile' },
   ]
+  const licenceDays = daysUntil(application.licence_expiry)
 
   return (
     <Shell title={TITLE} user={user} tabs={tabs} tab={tab} onTab={setTab} subtitle={`Signed in as ${application.full_name} · ${application.city}`}>
@@ -341,6 +350,13 @@ function DriverWork({ user, application }) {
           onFinished={() => setTab('jobs')}
         />
       ) : null}
+      {licenceDays != null && licenceDays <= 90 && tab !== 'profile' ? (
+        <div className="pt-pay-banner">
+          <span><strong>Your driver’s licence expires {licenceDays <= 0 ? 'today' : licenceDays === 1 ? 'tomorrow' : `in ${licenceDays} days`}</strong> ({prettyDate(application.licence_expiry)}). Upload your renewed licence so you can keep taking jobs.</span>
+          <button type="button" className="pt-btn is-small" onClick={() => setTab('profile')}>Upload new licence</button>
+        </div>
+      ) : null}
+      {tab === 'profile' ? <DriverProfile application={application} onChanged={onChanged} /> : null}
       {tab === 'payouts' ? <PayoutSetup summary={payout} allowBusinessNumber={false} onSaved={async () => { await reloadPayout(); setTab('jobs') }} /> : null}
       {needsPayout && tab !== 'payouts' && tab !== 'setup' ? (
         <div className="pt-pay-banner">
@@ -439,5 +455,120 @@ function Earnings({ orders }) {
         ))}
       </section>
     </div>
+  )
+}
+
+/* ---------- My profile: everything the driver submitted, plus licence renewal ---------- */
+
+function daysUntil(date) {
+  if (!date) return null
+  const today = new Date().toLocaleDateString('en-CA', { timeZone: 'America/Vancouver' })
+  return Math.round((Date.parse(`${date}T00:00:00Z`) - Date.parse(`${today}T00:00:00Z`)) / 86400000)
+}
+const prettyDate = (date) => (date ? new Date(`${date}T12:00:00Z`).toLocaleDateString('en-CA', { month: 'long', day: 'numeric', year: 'numeric' }) : '—')
+
+function docLabel(id) {
+  const all = [...DOCS, ...IMMIGRATION_STATUSES.flatMap((item) => eligibilityDocs(item.id))]
+  return all.find((doc) => doc.id === id)?.label || id.replace(/_/g, ' ')
+}
+
+export function DriverProfile({ application, onChanged }) {
+  const [error, setError] = useState('')
+  const docs = application.documents || {}
+  const expected = [...DOCS, ...eligibilityDocs(application.immigration_status)]
+  const extra = Object.keys(docs).filter((id) => !expected.some((doc) => doc.id === id))
+  async function open(path) {
+    setError('')
+    try { window.open(await documentUrl(path), '_blank', 'noopener') } catch (err) { setError(friendlyError(err)) }
+  }
+  const status = IMMIGRATION_STATUSES.find((item) => item.id === application.immigration_status)?.label
+  const days = daysUntil(application.licence_expiry)
+  return (
+    <div className="pt-stack">
+      <section className="pt-card pt-stack">
+        <div className="pt-row"><h2 className="pt-h2">My details</h2><Badge status={application.status} /></div>
+        <dl className="pt-dl">
+          <dt>Name</dt><dd>{application.full_name}</dd>
+          <dt>Email</dt><dd>{application.email}</dd>
+          <dt>Mobile</dt><dd>{application.phone}</dd>
+          <dt>Delivery area</dt><dd>{application.city}</dd>
+          <dt>Status in Canada</dt><dd>{status ? `${status}${application.permit_expiry ? ` · permit expires ${prettyDate(application.permit_expiry)}` : ''}` : 'Not given'}</dd>
+          <dt>Licence</dt><dd>{application.licence_class} · {application.licence_number}</dd>
+          <dt>Licence expires</dt><dd>{prettyDate(application.licence_expiry)}{days != null ? (days < 0 ? ' · expired' : ` · in ${days} day${days === 1 ? '' : 's'}`) : ''}</dd>
+          <dt>Vehicle</dt><dd>{[application.vehicle_year, application.vehicle_make_model, application.vehicle_type].filter(Boolean).join(' ')}</dd>
+          <dt>Fits large cakes</dt><dd>{application.fits_large_cakes ? 'Yes' : 'No'}</dd>
+          <dt>Air conditioning</dt><dd>{application.has_ac ? 'Yes' : 'No'}</dd>
+          <dt>Submitted</dt><dd>{when(application.created_at)}</dd>
+          {application.licence_renewed_at ? <><dt>Licence last updated</dt><dd>{when(application.licence_renewed_at)}</dd></> : null}
+        </dl>
+      </section>
+      <section className="pt-card pt-stack">
+        <h2 className="pt-h2">My documents</h2>
+        <p className="pt-muted pt-small">Only you and our review team can open these.</p>
+        <ul className="pt-doc-list">
+          {[...expected.map((doc) => doc.id), ...extra].map((id) => (
+            <li key={id} className={docs[id] ? 'is-done' : 'is-missing'}>
+              <span className="pt-doc-mark" aria-hidden="true">{docs[id] ? '✓' : '!'}</span>
+              <span className="pt-doc-text"><strong>{docLabel(id)}</strong><span className="pt-muted pt-small">{docs[id] ? `${docs[id].name || 'Uploaded'} · ${when(docs[id].uploadedAt)}` : 'Not uploaded'}</span></span>
+              {docs[id] ? <button type="button" className="pt-btn is-ghost is-small" onClick={() => open(docs[id].path)}>View</button> : null}
+            </li>
+          ))}
+        </ul>
+        {error ? <Notice kind="error">{error}</Notice> : null}
+      </section>
+      {['approved', 'suspended'].includes(application.status) ? <LicenceRenewal application={application} onDone={onChanged} /> : null}
+    </div>
+  )
+}
+
+function LicenceRenewal({ application, onDone }) {
+  const today = new Date().toLocaleDateString('en-CA', { timeZone: 'America/Vancouver' })
+  const [number, setNumber] = useState(application.licence_number || '')
+  const [expiry, setExpiry] = useState('')
+  const [confirm, setConfirm] = useState('')
+  const [front, setFront] = useState(null)
+  const [back, setBack] = useState(null)
+  const [busy, setBusy] = useState(false)
+  const [error, setError] = useState('')
+  const [done, setDone] = useState('')
+  const days = daysUntil(application.licence_expiry)
+  const urgent = application.licence_suspended || (days != null && days <= 90)
+
+  async function submit(event) {
+    event.preventDefault(); setError(''); setDone('')
+    const problem = licenceProblem(number) || (!expiry ? 'Enter the new expiry date.' : expiryProblem(expiry, today)) || (expiry !== confirm ? 'The two expiry dates don’t match.' : '') || (!front || !back ? 'Upload the front and back of your renewed licence.' : '')
+    if (problem) { setError(problem); return }
+    setBusy(true)
+    try {
+      const userId = application.user_id
+      const [f, b] = [await uploadDocument(userId, 'licence_front', front), await uploadDocument(userId, 'licence_back', back)]
+      const { error: err } = await supabase.rpc('driver_renew_licence', { p_number: number, p_expiry: expiry, p_front: f, p_back: b })
+      if (err) throw err
+      setDone(application.licence_suspended ? 'Thanks! Your licence is updated and your account is active again.' : 'Thanks! Your licence is updated.')
+      setFront(null); setBack(null); setExpiry(''); setConfirm('')
+      onDone?.()
+    } catch (err) {
+      setError(friendlyError(err))
+    }
+    setBusy(false)
+  }
+
+  return (
+    <section className={`pt-card pt-stack ${urgent ? 'pt-card-alert' : ''}`} id="licence-renewal">
+      <h2 className="pt-h2">{application.licence_suspended ? 'Upload your renewed licence to start driving again' : 'Renewed your licence?'}</h2>
+      <p className="pt-muted">{application.licence_suspended ? 'Your account is paused because your licence expired.' : 'Upload the new card here before your current one expires. We remind you 90, 30, 15, 7, 3 and 1 days before, and pause your account if it expires.'}</p>
+      <form className="pt-stack" onSubmit={submit} noValidate>
+        <FileField label="New licence (front)" required value={front} onChange={setFront} />
+        <FileField label="New licence (back)" required value={back} onChange={setBack} />
+        <Field label="Licence number" required error={licenceProblem(number)}><input className="pt-input" inputMode="numeric" maxLength={9} value={number} onChange={(e) => setNumber(e.target.value.replace(/[^\d\s-]/g, ''))} /></Field>
+        <div className="pt-grid-2">
+          <Field label="New expiry date" required><input className="pt-input" type="date" min={today} value={expiry} onChange={(e) => setExpiry(e.target.value)} /></Field>
+          <Field label="Confirm expiry date" required error={expiry && confirm && expiry !== confirm ? 'Dates don’t match.' : ''}><input className="pt-input" type="date" min={today} value={confirm} onChange={(e) => setConfirm(e.target.value)} onPaste={(e) => e.preventDefault()} /></Field>
+        </div>
+        {error ? <Notice kind="error">{error}</Notice> : null}
+        {done ? <Notice kind="ok">{done}</Notice> : null}
+        <button type="submit" className="pt-btn" disabled={busy}>{busy ? 'Uploading…' : 'Update my licence'}</button>
+      </form>
+    </section>
   )
 }

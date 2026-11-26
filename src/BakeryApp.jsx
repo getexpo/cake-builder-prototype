@@ -25,8 +25,8 @@ export function templateFor(category) {
 export default function BakeryApp() {
   const { loading, session } = useSession()
   const gate = useAccountGate(session, async (user) => {
-    const { data } = await supabase.from('bakery_applications').select('id').eq('user_id', user.id).maybeSingle()
-    return Boolean(data)
+    const { data } = await supabase.from('bakery_applications').select('id').eq('user_id', user.id).limit(1)
+    return Boolean(data?.length)
   }, (email) => `There’s no bakery account for ${email} yet. Tap “Create a bakery account” to apply.`)
   if (loading || gate.checking) return <Loading title={TITLE} />
   if (!session) {
@@ -48,43 +48,85 @@ export default function BakeryApp() {
   return <BakeryHome user={session.user} />
 }
 
+const SELECTED_KEY = 'bakery-selected'
+
 function BakeryHome({ user }) {
-  const [application, setApplication] = useState(undefined)
-  const [bakery, setBakery] = useState(null)
+  const [applications, setApplications] = useState(undefined)
+  const [bakeries, setBakeries] = useState([])
+  const [selectedId, setSelectedId] = useState(() => { try { return localStorage.getItem(SELECTED_KEY) || '' } catch { return '' } })
   const [editing, setEditing] = useState(false)
+  const [adding, setAdding] = useState(false)
   const [error, setError] = useState('')
 
   const load = useCallback(async () => {
     const [appRes, shopRes] = await Promise.all([
-      supabase.from('bakery_applications').select('*').eq('user_id', user.id).maybeSingle(),
-      supabase.from('bakeries').select('*').eq('owner_id', user.id).maybeSingle(),
+      supabase.from('bakery_applications').select('*').eq('user_id', user.id).order('created_at', { ascending: true }),
+      supabase.from('bakeries').select('*').eq('owner_id', user.id),
     ])
     if (appRes.error) setError(friendlyError(appRes.error))
-    setApplication(appRes.data || null)
-    setBakery(shopRes.data || null)
+    setApplications(appRes.data || [])
+    setBakeries(shopRes.data || [])
+    return appRes.data || []
   }, [user.id])
 
+  const choose = useCallback((id) => {
+    setSelectedId(id); setEditing(false); setAdding(false)
+    try { localStorage.setItem(SELECTED_KEY, id) } catch { /* private mode */ }
+  }, [])
+
   useEffect(() => { load() }, [load])
-  // While the application is being reviewed, check every 20 seconds so approval shows up on its own.
+  const application = applications?.find((item) => item.id === selectedId) || applications?.[0] || null
+  const bakery = application ? bakeries.find((shop) => shop.application_id === application.id) || (bakeries.length === 1 && applications.length === 1 && !bakeries[0].application_id ? bakeries[0] : null) : null
+  // While an application is being reviewed, check every 20 seconds so approval shows up on its own.
   const waiting = application && (application.status === 'pending' || (application.status === 'approved' && !bakery))
   useEffect(() => {
-    if (!waiting || editing) return undefined
+    if (!waiting || editing || adding) return undefined
     const timer = setInterval(load, 20000)
     return () => clearInterval(timer)
-  }, [waiting, editing, load])
+  }, [waiting, editing, adding, load])
 
-  if (application === undefined) return <Loading title={TITLE} />
-  if (!application || editing) {
+  if (applications === undefined) return <Loading title={TITLE} />
+
+  const switcher = applications.length ? (
+    <>
+      {applications.length > 1 ? (
+        <select className="pt-switch" aria-label="Switch bakery" value={adding ? '' : application?.id} onChange={(e) => choose(e.target.value)}>
+          {adding ? <option value="">New bakery…</option> : null}
+          {applications.map((item) => <option key={item.id} value={item.id}>{item.business_name}{item.status === 'approved' ? '' : ` (${item.status})`}</option>)}
+        </select>
+      ) : null}
+      {!adding ? <button type="button" className="pt-btn is-ghost is-small" onClick={() => { setAdding(true); setEditing(false) }}>+ Add another bakery</button> : null}
+    </>
+  ) : null
+
+  if (!application || editing || adding) {
+    const first = applications[0]
+    const prefill = adding && first ? {
+      contact_name: first.contact_name, email: first.email, phone: first.phone,
+      immigration_status: first.immigration_status, permit_expiry: first.permit_expiry,
+      documents: Object.fromEntries(Object.entries(first.documents || {}).filter(([id]) => !DOCS.some((doc) => doc.id === id))),
+    } : null
     return (
-      <Shell title={TITLE} user={user}>
+      <Shell title={adding ? 'Add a bakery' : TITLE} user={user} headerExtra={switcher}>
         {error ? <Notice kind="error">{error}</Notice> : null}
-        <BakeryForm user={user} existing={application} onDone={() => { setEditing(false); load() }} />
+        {adding ? <button type="button" className="pt-link-btn" onClick={() => setAdding(false)}>← Back to {application?.business_name}</button> : null}
+        <BakeryForm
+          key={adding ? 'new' : application?.id || 'first'}
+          user={user}
+          existing={adding ? null : application}
+          prefill={prefill}
+          onDone={async () => {
+            const list = await load()
+            if (adding && list.length) choose(list[list.length - 1].id)
+            setEditing(false); setAdding(false)
+          }}
+        />
       </Shell>
     )
   }
   if (application.status !== 'approved' || !bakery) {
     return (
-      <Shell title={TITLE} user={user}>
+      <Shell title={TITLE} user={user} headerExtra={switcher}>
         <section className="pt-card pt-stack">
           <div className="pt-row"><h1 className="pt-h1">{application.business_name}</h1><Badge status={application.status} /></div>
           {application.status === 'pending' ? <p>Thanks! We’re reviewing your application and food permit. We’ll text you at {application.phone} when you’re approved, usually within 2 business days.</p> : null}
@@ -103,21 +145,21 @@ function BakeryHome({ user }) {
       </Shell>
     )
   }
-  return <BakeryDashboard user={user} bakery={bakery} application={application} onSaved={load} />
+  return <BakeryDashboard key={bakery.id} user={user} bakery={bakery} application={application} onSaved={load} headerExtra={switcher} />
 }
 
-function BakeryForm({ user, existing, onDone }) {
+function BakeryForm({ user, existing, prefill, onDone }) {
   const [form, setForm] = useState(() => ({
     business_name: '', contact_name: user.user_metadata?.full_name || '', phone: '', address: '', city: 'Vancouver',
-    category: 'cakes', description: '', food_permit_number: '', agree: false, ...(existing || {}),
-    email: existing?.email || user.email || '', permit_expiry: existing?.permit_expiry || '', immigration_status: existing?.immigration_status || '',
+    category: 'cakes', description: '', food_permit_number: '', agree: false, ...(existing || prefill || {}),
+    email: (existing || prefill)?.email || user.email || '', permit_expiry: (existing || prefill)?.permit_expiry || '', immigration_status: (existing || prefill)?.immigration_status || '',
     locations: existing?.locations?.length ? existing.locations : [{ ...newLocation(), name: '', address: existing?.address || '', city: existing?.city || 'Vancouver' }],
   }))
   const [files, setFiles] = useState({})
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState('')
   const set = (key, value) => setForm((current) => ({ ...current, [key]: value }))
-  const haveDoc = (id) => Boolean(files[id] || existing?.documents?.[id])
+  const haveDoc = (id) => Boolean(files[id] || (existing || prefill)?.documents?.[id])
   const [phoneOk, setPhoneOk] = useState(false)
   const permitError = permitProblem(form.food_permit_number)
   const today = new Date().toISOString().slice(0, 10)
@@ -144,7 +186,7 @@ function BakeryForm({ user, existing, onDone }) {
     if (missing.length) { setError(`Please add ${missing[0]}.`); return }
     setBusy(true); setError('')
     try {
-      const documents = { ...(existing?.documents || {}) }
+      const documents = { ...((existing || prefill)?.documents || {}) }
       for (const doc of [...DOCS, ...eligibilityDocs(form.immigration_status)]) {
         if (files[doc.id]) documents[doc.id] = await uploadDocument(user.id, doc.id, files[doc.id])
       }
@@ -169,8 +211,8 @@ function BakeryForm({ user, existing, onDone }) {
   return (
     <form className="pt-stack" onSubmit={submit} noValidate>
       <div>
-        <h1 className="pt-h1">{existing ? 'Update your application' : 'Apply to sell on our app'}</h1>
-        <p className="pt-muted">Takes about 5 minutes. You’ll set up your menu after you’re approved.</p>
+        <h1 className="pt-h1">{existing ? 'Update your application' : prefill ? 'Add another bakery' : 'Apply to sell on our app'}</h1>
+        <p className="pt-muted">{prefill ? 'Each bakery is reviewed on its own, with its own food permit and business licence. We’ve filled in your contact details.' : 'Takes about 5 minutes. You’ll set up your menu after you’re approved.'}</p>
       </div>
       <section className="pt-card pt-stack">
         <h2 className="pt-h2">Your bakery</h2>
@@ -212,7 +254,7 @@ function BakeryForm({ user, existing, onDone }) {
   )
 }
 
-function BakeryDashboard({ user, bakery, application, onSaved }) {
+function BakeryDashboard({ user, bakery, application, onSaved, headerExtra }) {
   const [tab, setTab] = useState(bakery.active ? 'orders' : 'setup')
   const [orders, setOrders] = useState([])
   const [error, setError] = useState('')
@@ -261,7 +303,7 @@ function BakeryDashboard({ user, bakery, application, onSaved }) {
   ]
 
   return (
-    <Shell title={bakery.name} user={user} tabs={tabs} tab={tab} onTab={setTab} wide>
+    <Shell title={bakery.name} user={user} tabs={tabs} tab={tab} onTab={setTab} wide headerExtra={headerExtra}>
       {payout !== undefined && !payout?.bank_last4 && tab !== 'payouts' && tab !== 'setup' ? (
         <div className="pt-pay-banner">
           <span><strong>Add your bank details to get paid.</strong> We send your earnings by direct deposit every week.</span>

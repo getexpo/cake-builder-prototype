@@ -95,7 +95,7 @@ function Applications({ kind, rows, shops = [], onChanged }) {
             <span><strong>{kind === 'driver' ? row.full_name : row.business_name}</strong><br /><span className="pt-muted pt-small">{row.city} · applied {when(row.created_at)}</span></span>
             <Badge status={row.status} />
           </button>
-          {openId === row.id ? <Review kind={kind} row={row} shop={shops.find((shop) => shop.owner_id === row.user_id)} onChanged={onChanged} /> : null}
+          {openId === row.id ? <Review kind={kind} row={row} shop={shops.find((shop) => shop.application_id === row.id) || shops.find((shop) => !shop.application_id && shop.owner_id === row.user_id)} onChanged={onChanged} /> : null}
         </article>
       ))}
     </div>

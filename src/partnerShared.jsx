@@ -81,12 +81,13 @@ export function Badge({ status }) {
   return <span className={`pt-badge is-${status}`}>{STATUS_LABELS[status] || status}</span>
 }
 
-export function Shell({ title, subtitle, user, tabs, tab, onTab, children, wide }) {
+export function Shell({ title, subtitle, user, tabs, tab, onTab, children, wide, headerExtra }) {
   return (
     <div className="pt-root">
       <header className="pt-top">
         <div className="pt-top-inner">
           <a href="/" className="pt-brand" aria-label="Back to the customer app"><span className="pt-logo" aria-hidden="true">🎂</span><span>{title}</span></a>
+          {headerExtra ? <div className="pt-top-extra">{headerExtra}</div> : null}
           {user ? <span className="pt-who"><span className="pt-who-email" title={user.email}>{user.email}</span><button type="button" className="pt-link-btn" onClick={signOut}>Sign out</button></span> : null}
         </div>
         {tabs ? (
