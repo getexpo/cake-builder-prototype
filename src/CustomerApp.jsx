@@ -2,7 +2,7 @@ import { useCallback, useEffect, useMemo, useState } from 'react'
 import { CATEGORIES, SHOPS } from './catalog.js'
 import { cakeOptions } from './builderLibrary.js'
 import { friendlyError, supabase } from './supabaseClient.js'
-import { STATUS_HINT, addDays, dateLabel, dayStatus, earliestDay, leadFor, noticeLabel, timeLabel, timesOn, vanDate, vanMoment } from './schedule.js'
+import { STATUS_HINT, addDays, dateLabel, dayStatus, earliestDay, leadFor, noticeLabel, timesOn, vanDate, vanMoment } from './schedule.js'
 import { ChatThread, ConversationList, MonthCalendar, PhoneInput, PhoneVerify, useConversations } from './widgets.jsx'
 import { phoneProblem } from './validate.js'
 import { distanceKm, geocode, kmLabel, shopLocations } from './geo.js'
@@ -117,12 +117,6 @@ function readDetails() {
 
 function timeText(date) {
   return date.toLocaleTimeString('en-CA', { hour: 'numeric', minute: '2-digit' }).replace(':00', '').replace(/\./g, '')
-}
-
-function windowLabel(day, time) {
-  const [hh, mm] = time.split(':').map(Number)
-  const endTime = `${String(hh + 1).padStart(2, '0')}:${String(mm).padStart(2, '0')}`
-  return `${dateLabel(day)} · ${timeLabel(time)}–${timeLabel(endTime)}`
 }
 
 // Earliest day anything on this shop's menu can be ready.
@@ -1343,7 +1337,7 @@ export default function CustomerApp({ ctx }) {
     const sum = (key) => Math.round(groups.reduce((acc, group) => acc + group[key], 0) * 100) / 100
     const many = groups.length > 1
     const timesMissing = groups.some((group) => !group.date || !group.time)
-    const blocker = !signedIn ? '' : timesMissing ? 'Pick a date and time for every item' : delivery && !address.line1 ? 'Add a delivery address' : !phone ? 'Add a phone number' : phoneProblem(phone) ? 'Enter a 10-digit phone number' : !checkout.phoneOk ? 'Confirm your phone number: tap “Text me a code”' : card.last4.length !== 4 ? 'Add a card' : ''
+    const blocker = !signedIn ? '' : timesMissing ? 'Pick an available date for every item' : delivery && !address.line1 ? 'Add a delivery address' : !phone ? 'Add a phone number' : phoneProblem(phone) ? 'Enter a 10-digit phone number' : !checkout.phoneOk ? 'Confirm your phone number: tap “Text me a code”' : card.last4.length !== 4 ? 'Add a card' : ''
 
     function setItemDate(itemId, date) {
       setCart(cart.map((item) => (item.id === itemId ? { ...item, date } : item)))
@@ -1380,8 +1374,9 @@ export default function CustomerApp({ ctx }) {
           tip: group.tip,
           total: group.total,
           fulfillment: delivery ? 'delivery' : 'pickup',
-          ready_at: vanMoment(group.date, group.time).toISOString(),
-          ready_window: windowLabel(group.date, group.time),
+          // Customers choose a date only; the bakery and driver arrange the exact time.
+          ready_at: vanMoment(group.date, '12:00').toISOString(),
+          ready_window: dateLabel(group.date, true),
           dropoff: delivery ? address : null,
           notes: checkout.notes.trim() || null,
           payment: { mode: 'test', last4: card.last4, name: card.name },
@@ -1470,20 +1465,12 @@ export default function CustomerApp({ ctx }) {
           </section>
 
           <section className="ca-stack-10">
-            <h2 className="ca-h3">{delivery ? 'Delivery time' : `Pickup time at ${shop.name}`}</h2>
+            <h2 className="ca-h3">{delivery ? 'Delivery date' : `Pickup date at ${shop.name}`}</h2>
             {many ? <p className="ca-muted ca-small ca-lh">Your items are on {groups.length} different dates, so this becomes {groups.length} orders, one per date.</p> : null}
             {groups.map((group) => (
               <div key={group.date} className="ca-stack-8">
                 {many ? <strong className="ca-small">{group.date ? dateLabel(group.date, true) : 'No date yet'} · {group.items.map((item) => item.title).join(', ')}</strong> : <strong className="ca-small">{group.date ? dateLabel(group.date, true) : 'Pick a date above'}</strong>}
-                {group.times.length ? (
-                  <div className="cx-chip-row">
-                    {group.times.map((time) => (
-                      <button key={time} type="button" aria-pressed={group.time === time} className={`cx-chip ${group.time === time ? 'is-on' : ''}`} onClick={() => setC({ times: { ...checkout.times, [group.date]: time } })}>
-                        {windowLabel(group.date, time).split(' · ')[1]}
-                      </button>
-                    ))}
-                  </div>
-                ) : <span className="ca-muted ca-small">No times left that day. Pick another date.</span>}
+                {group.date && !group.times.length ? <span className="ca-muted ca-small">That date needs more notice. Pick a later date.</span> : null}
               </div>
             ))}
           </section>

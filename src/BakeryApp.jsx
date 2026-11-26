@@ -3,7 +3,7 @@ import { CATEGORIES, SHOPS } from './catalog.js'
 import { friendlyError, supabase, uploadDocument } from './supabaseClient.js'
 import { Badge, Check, Field, FileField, LocationsEditor, Loading, Notice, Shell, SignInScreen, WorkEligibility, eligibilityDocs, eligibilityMissing, locationsProblem, money, useAccountGate, useSession, when } from './partnerShared.jsx'
 import { newLocation, shopLocations, withCoordinates } from './geo.js'
-import { DEFAULT_TIMES, NOTICE_OPTIONS, WEEKDAYS, dateLabel, timeLabel, vanDate, weekday } from './schedule.js'
+import { DEFAULT_TIMES, NOTICE_OPTIONS, WEEKDAYS, dateLabel, vanDate, weekday } from './schedule.js'
 import { LIBRARY, cakeOptions } from './builderLibrary.js'
 import { ChatThread, ConversationList, MonthCalendar, PayoutSetup, PhoneInput, PhoneVerify, SetupChecklist, usePayoutSummary, useConversations } from './widgets.jsx'
 import { cleanPermit, permitProblem, phoneProblem } from './validate.js'
@@ -318,17 +318,120 @@ function BakeryDashboard({ user, bakery, application, onSaved }) {
       ) : null}
       {tab === 'calendar' ? <BakeryCalendar bakery={bakery} orders={orders} onSaved={onSaved} /> : null}
       {tab === 'messages' ? <BakeryMessages conversations={conversations} reload={loadConversations} /> : null}
-      {tab === 'menu' ? <MenuEditor bakery={bakery} onSaved={onSaved} /> : null}
+      {tab === 'menu' ? <MenusTab bakery={bakery} onSaved={onSaved} /> : null}
       {tab === 'shop' ? <ShopSettings bakery={bakery} onSaved={onSaved} /> : null}
     </Shell>
   )
 }
 
-function MenuEditor({ bakery, onSaved }) {
-  const hasBuilder = bakery.builder && Object.keys(bakery.builder).length
+// A bakery can keep several menus (Menu 1, Menu 2…). The default one is what customers see;
+// it is also copied into bakeries.builder / bakeries.menu, which the customer app reads.
+function bakeryMenus(bakery) {
+  if (Array.isArray(bakery.menus) && bakery.menus.length) return bakery.menus
+  const has = (bakery.builder && Object.keys(bakery.builder).length) || (bakery.menu || []).length
+  return has ? [{ id: 'menu-1', name: 'Menu 1', builder: bakery.builder, menu: bakery.menu || [] }] : []
+}
+
+function MenusTab({ bakery, onSaved }) {
+  const menus = bakeryMenus(bakery)
+  const defaultId = menus.some((item) => item.id === bakery.default_menu_id) ? bakery.default_menu_id : menus[0]?.id
+  const [editing, setEditing] = useState(() => (menus.length ? null : 'new'))
+  const [message, setMessage] = useState('')
+  const [error, setError] = useState('')
+
+  async function persist(nextMenus, nextDefault) {
+    const chosen = nextMenus.find((item) => item.id === nextDefault) || nextMenus[0]
+    // The first time a newly approved bakery saves a menu, the shop goes live for customers.
+    const goLive = Boolean(chosen) && !bakery.active && !bakery.went_live_at
+    const { error: err } = await supabase.from('bakeries').update({
+      menus: nextMenus, default_menu_id: chosen?.id || null, builder: chosen?.builder || {}, menu: chosen?.menu || [],
+      ...(goLive ? { active: true, went_live_at: new Date().toISOString() } : {}),
+    }).eq('id', bakery.id)
+    if (!err) onSaved()
+    return { error: err, goLive }
+  }
+
+  async function saveMenu(id, data, makeDefault) {
+    const isNew = !menus.some((item) => item.id === id)
+    const nextMenus = isNew ? [...menus, { id, ...data }] : menus.map((item) => (item.id === id ? { ...item, ...data } : item))
+    const nextDefault = makeDefault || !menus.length ? id : defaultId
+    const result = await persist(nextMenus, nextDefault)
+    if (!result.error) {
+      setEditing(null); setError('')
+      setMessage(result.goLive ? `${data.name} saved. Your shop is now live: customers can find it in the app.` : `${data.name} saved.${nextDefault === id ? ' Customers see this menu.' : ''}`)
+    }
+    return result
+  }
+
+  async function makeDefault(id) {
+    setMessage(''); setError('')
+    const { error: err } = await persist(menus, id)
+    if (err) setError(friendlyError(err)); else setMessage(`${menus.find((item) => item.id === id)?.name} is now your default menu.`)
+  }
+
+  async function remove(id) {
+    if (id === defaultId) return
+    if (!window.confirm(`Delete ${menus.find((item) => item.id === id)?.name}? This can't be undone.`)) return
+    setMessage(''); setError('')
+    const { error: err } = await persist(menus.filter((item) => item.id !== id), defaultId)
+    if (err) setError(friendlyError(err)); else setMessage('Menu deleted.')
+  }
+
+  if (editing) {
+    const existing = menus.find((item) => item.id === editing)
+    const base = existing || menus.find((item) => item.id === defaultId)
+    return (
+      <MenuEditor
+        key={editing}
+        bakery={bakery}
+        source={base ? { builder: base.builder, menu: base.menu } : null}
+        initialName={existing ? existing.name : `Menu ${menus.length + 1}`}
+        isDefault={!menus.length || editing === defaultId}
+        isFirst={!menus.length}
+        onBack={menus.length ? () => setEditing(null) : null}
+        onSave={(data, makeDefaultToo) => saveMenu(existing ? existing.id : `menu-${Date.now().toString(36)}`, data, makeDefaultToo)}
+      />
+    )
+  }
+
+  return (
+    <div className="pt-stack">
+      <section className="pt-card pt-stack">
+        <div className="pt-row"><h2 className="pt-h2">Your menus</h2><button type="button" className="pt-btn is-small" onClick={() => { setMessage(''); setEditing('new') }}>+ Add another menu</button></div>
+        <p className="pt-muted">Keep different menus, for example a holiday menu. Customers see your default menu.</p>
+        {message ? <Notice kind="ok">{message}</Notice> : null}
+        {error ? <Notice kind="error">{error}</Notice> : null}
+        <div className="pt-menu-list">
+          {menus.map((item) => {
+            const opts = item.builder?.kind === 'cake' ? cakeOptions(item.builder) : null
+            return (
+              <article key={item.id} className={`pt-menu-card ${item.id === defaultId ? 'is-default' : ''}`}>
+                <div className="pt-row">
+                  <strong>{item.name}</strong>
+                  {item.id === defaultId ? <span className="pt-badge is-approved">Default · customers see this</span> : null}
+                </div>
+                <span className="pt-muted pt-small">{opts ? `${opts.flavours.length} flavours · ${opts.fillings.length} fillings · ${opts.frostings.length} frostings · ${opts.sizes.length} sizes · ` : ''}{(item.menu || []).length} ready-made cake{(item.menu || []).length === 1 ? '' : 's'}</span>
+                <div className="pt-row pt-row-start pt-wrap">
+                  <button type="button" className="pt-btn is-small" onClick={() => { setMessage(''); setEditing(item.id) }}>Edit</button>
+                  {item.id !== defaultId ? <button type="button" className="pt-btn is-ghost is-small" onClick={() => makeDefault(item.id)}>Make default</button> : null}
+                  {item.id !== defaultId ? <button type="button" className="pt-link-btn" onClick={() => remove(item.id)}>Delete</button> : null}
+                </div>
+              </article>
+            )
+          })}
+        </div>
+      </section>
+    </div>
+  )
+}
+
+function MenuEditor({ bakery, source, initialName, isDefault, isFirst, onBack, onSave }) {
+  const hasBuilder = source?.builder && Object.keys(source.builder).length
   // Customers only build custom cakes, so every bakery uses the cake builder.
-  const [builder, setBuilder] = useState(() => withOptions({ ...(hasBuilder && bakery.builder.kind === 'cake' ? bakery.builder : templateFor('cakes').builder), kind: 'cake', noun: 'cake' }))
-  const [items, setItems] = useState(() => (bakery.menu || []).map((item) => ({ ...item })))
+  const [builder, setBuilder] = useState(() => withOptions({ ...(hasBuilder && source.builder.kind === 'cake' ? source.builder : templateFor('cakes').builder), kind: 'cake', noun: 'cake' }))
+  const [items, setItems] = useState(() => (source?.menu || []).map((item) => ({ ...item })))
+  const [name, setName] = useState(initialName)
+  const [asDefault, setAsDefault] = useState(isDefault)
   const [busy, setBusy] = useState(false)
   const [message, setMessage] = useState('')
   const [error, setError] = useState('')
@@ -340,16 +443,22 @@ function MenuEditor({ bakery, onSaved }) {
     const clean = items.filter((item) => item.title.trim()).map((item, index) => ({ id: item.id || `${bakery.id}-m${Date.now()}-${index}`, title: item.title.trim(), detail: (item.detail || '').trim(), price: Math.max(0, Number(item.price) || 0), leadHours: Number(item.leadHours) || 0 }))
     const problem = builderProblem(builder)
     if (problem) { setBusy(false); setError(problem); return }
-    // The first time a newly approved bakery saves its options, the shop goes live for customers.
-    const goLive = !bakery.active && !bakery.went_live_at
-    const { error: err } = await supabase.from('bakeries').update({ builder: cleanBuilder(builder), menu: clean, ...(goLive ? { active: true, went_live_at: new Date().toISOString() } : {}) }).eq('id', bakery.id)
+    if (!name.trim()) { setBusy(false); setError('Give this menu a name.'); return }
+    const { error: err } = await onSave({ name: name.trim(), builder: cleanBuilder(builder), menu: clean }, asDefault)
     setBusy(false)
     if (err) setError(friendlyError(err))
-    else { setMessage(goLive ? 'Saved. Your shop is now live: customers can find it in the app.' : 'Menu saved.'); setItems(clean); onSaved() }
   }
 
   return (
     <div className="pt-stack">
+      <section className="pt-card pt-stack">
+        {onBack ? <button type="button" className="pt-link-btn pt-back" onClick={onBack}>← All menus</button> : null}
+        {isFirst ? <p className="pt-muted">Set up your first menu. When you save, it’s kept as “Menu 1” and you can add more menus later.</p> : null}
+        <Field label="Menu name" required hint="Only you see this, e.g. “Menu 1” or “Holiday menu”.">
+          <input className="pt-input" maxLength={40} value={name} onChange={(e) => setName(e.target.value)} />
+        </Field>
+        {!isFirst ? <Check checked={asDefault} onChange={setAsDefault}>Make this my default menu (the one customers see)</Check> : null}
+      </section>
       <section className="pt-card pt-stack">
         <h2 className="pt-h2">Custom cakes</h2>
         <p className="pt-muted">Customers see “Build your own cake” at the top of your menu and choose from the options you tick below.</p>
@@ -399,14 +508,13 @@ function MenuEditor({ bakery, onSaved }) {
       </section>
       {error ? <Notice kind="error">{error}</Notice> : null}
       {message ? <Notice kind="ok">{message}</Notice> : null}
-      <button type="button" className="pt-btn is-large" disabled={busy} onClick={save}>{busy ? 'Saving…' : 'Save menu'}</button>
+      <button type="button" className="pt-btn is-large" disabled={busy} onClick={save}>{busy ? 'Saving…' : `Save ${name.trim() || 'menu'}`}</button>
     </div>
   )
 }
 
 function ShopSettings({ bakery, onSaved }) {
   const [form, setForm] = useState({ name: bakery.name, tagline: bakery.tagline, address: bakery.address, area: bakery.area, phone: bakery.phone || '', lead_hours: bakery.lead_hours, active: bakery.active, closed_days: bakery.closed_days || [], pickup_times: bakery.pickup_times?.length ? bakery.pickup_times : DEFAULT_TIMES, daily_capacity: bakery.daily_capacity ?? '', locations: bakery.locations?.length ? bakery.locations : shopLocations({ address: bakery.address, area: bakery.area }).map((item) => ({ ...item, id: newLocation().id, name: '' })) })
-  const [newTime, setNewTime] = useState('11:00')
   const [busy, setBusy] = useState(false)
   const [message, setMessage] = useState('')
   const [error, setError] = useState('')
@@ -419,7 +527,6 @@ function ShopSettings({ bakery, onSaved }) {
     if (phoneProblem(form.phone)) { setBusy(false); setError('Enter a 10-digit shop phone number.'); return }
     if (form.phone.trim() && !phoneOk) { setBusy(false); setError('Confirm the shop phone first: tap “Text me a code”.'); return }
     const template = templateFor(bakery.category)
-    if (!form.pickup_times.length) { setBusy(false); setError('Add at least one pickup time.'); return }
     if (form.closed_days.length === 7) { setBusy(false); setError('Leave at least one day open.'); return }
     const placeProblem = locationsProblem(form.locations)
     if (placeProblem) { setBusy(false); setError(placeProblem); return }
@@ -458,17 +565,6 @@ function ShopSettings({ bakery, onSaved }) {
               const open = !form.closed_days.includes(index)
               return <button key={name} type="button" aria-pressed={open} className={`cx-chip ${open ? 'is-on' : ''}`} onClick={() => set('closed_days', open ? [...form.closed_days, index] : form.closed_days.filter((day) => day !== index))}>{name}</button>
             })}
-          </div>
-        </Field>
-        <Field label="Pickup and delivery times" hint="Customers choose one of these. Each is a 1-hour window.">
-          <div className="cx-chip-row">
-            {[...form.pickup_times].sort().map((time) => (
-              <span key={time} className="cx-chip is-on">{timeLabel(time)}<button type="button" aria-label={`Remove ${timeLabel(time)}`} onClick={() => set('pickup_times', form.pickup_times.filter((item) => item !== time))}>×</button></span>
-            ))}
-          </div>
-          <div className="pt-row pt-row-start">
-            <input className="pt-input pt-time" type="time" step={1800} aria-label="New pickup time" value={newTime} onChange={(e) => setNewTime(e.target.value)} />
-            <button type="button" className="pt-btn is-ghost" onClick={() => { if (newTime && !form.pickup_times.includes(newTime)) set('pickup_times', [...form.pickup_times, newTime]) }}>+ Add time</button>
           </div>
         </Field>
         <Field label="Most orders per day" hint="When a day reaches this, customers see it as fully booked. Leave blank for no limit.">
@@ -553,7 +649,7 @@ function BakeryCalendar({ bakery, orders, onSaved }) {
         {!dayOrders.length ? <p className="pt-muted">Nothing due this day.</p> : null}
         {dayOrders.map((order) => (
           <article key={order.id} className="pt-cal-order">
-            <div className="pt-row"><strong>{(order.ready_window || '').split(' · ')[1] || when(order.ready_at)} · {order.fulfillment === 'delivery' ? 'Delivery' : 'Pickup'}</strong><Badge status={order.status} /></div>
+            <div className="pt-row"><strong>{(order.ready_window || '').split(' · ')[1] ? `${order.ready_window.split(' · ')[1]} · ` : ''}{order.fulfillment === 'delivery' ? 'Delivery' : 'Pickup'} · #{String(order.id).slice(0, 6).toUpperCase()}</strong><Badge status={order.status} /></div>
             <span className="pt-small">#{order.id.slice(0, 6).toUpperCase()} · {order.customer_name || 'Customer'}</span>
             {(order.items || []).map((item, index) => <span key={index} className="pt-small"><strong>{item.quantity || 1}× {item.title}</strong>{item.summary ? ` · ${item.summary}` : ''}</span>)}
             {order.notes ? <span className="pt-small pt-muted">Note: {order.notes}</span> : null}
