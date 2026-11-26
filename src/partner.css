@@ -4,7 +4,8 @@
 .pt-root {
   --ink: #1C1917; --muted: #57534E; --line: #E7E5E4; --soft: #F5F5F4; --warm: #FAF7F5;
   --accent: #BE185D; --accent-dark: #9D174D; --accent-soft: #FCE7F3; --accent-wash: #FDF2F8;
-  min-height: 100vh; background: var(--warm); color: var(--ink);
+  position: fixed; inset: 0; overflow-y: auto; -webkit-overflow-scrolling: touch; overscroll-behavior: contain;
+  background: var(--warm); color: var(--ink);
   font-family: 'Plus Jakarta Sans', system-ui, -apple-system, 'Segoe UI', sans-serif; font-size: 15px; line-height: 1.45;
 }
 .pt-root *, .pt-root *::before, .pt-root *::after { box-sizing: border-box; }
