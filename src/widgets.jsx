@@ -1,6 +1,8 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { friendlyError, supabase } from './supabaseClient.js'
 import { WEEKDAYS, addDays, dateLabel, vanDate, weekday } from './schedule.js'
+import { normalizePhone, phoneProblem } from './validate.js'
+import { PHONE_COUNTRIES, joinPhone, splitPhone } from './places.js'
 import './widgets.css'
 
 /* ---------- Month calendar ---------- */
@@ -196,4 +198,160 @@ export function useConversations(filter, enabled = true) {
     return () => clearInterval(timer)
   }, [load, enabled])
   return [list, load]
+}
+
+/* ---------- Phone verification by text code ---------- */
+
+let smsEnabledPromise = null
+function loadSmsEnabled() {
+  if (!smsEnabledPromise) {
+    smsEnabledPromise = supabase.from('app_settings').select('value').eq('key', 'sms_enabled').maybeSingle()
+      .then(({ data }) => data?.value === true)
+      .catch(() => false)
+  }
+  return smsEnabledPromise
+}
+
+// Shows "Text me a code" under a phone field and reports whether the number is good to use.
+// While texting is switched off (no Twilio number yet) any valid number counts as ok.
+export function PhoneVerify({ phone, variant = 'pt', onOkChange }) {
+  const target = normalizePhone(phone)
+  const [state, setState] = useState('idle') // idle | checking | ready | sending | sent | verifying | verified | skipped
+  const [code, setCode] = useState('')
+  const [note, setNote] = useState('')
+  const okRef = useRef(onOkChange)
+  okRef.current = onOkChange
+
+  useEffect(() => {
+    let live = true
+    setCode(''); setNote('')
+    if (!target) { setState('idle'); okRef.current?.(false); return undefined }
+    setState('checking')
+    ;(async () => {
+      const enabled = await loadSmsEnabled()
+      if (!live) return
+      if (!enabled) { setState('skipped'); okRef.current?.(true); return }
+      const { data } = await supabase.from('verified_phones').select('phone').eq('phone', target).maybeSingle()
+      if (!live) return
+      if (data) { setState('verified'); okRef.current?.(true) } else { setState('ready'); okRef.current?.(false) }
+    })()
+    return () => { live = false }
+  }, [target])
+
+  async function sendCode() {
+    setState('sending'); setNote('')
+    const { data, error } = await supabase.rpc('start_phone_verification', { p_phone: target })
+    if (error) { setState('ready'); setNote(friendlyError(error)); return }
+    if (data?.status === 'verified' || data?.status === 'skipped') { setState(data.status); okRef.current?.(true); return }
+    setState('sent'); setNote(`We texted a 6-digit code to ${phone}.`)
+  }
+
+  async function checkCode() {
+    if (code.length !== 6) { setNote('Enter the 6-digit code.'); return }
+    setState('verifying')
+    const { data, error } = await supabase.rpc('check_phone_verification', { p_phone: target, p_code: code })
+    if (error) { setState('sent'); setNote(friendlyError(error)); return }
+    if (data?.status === 'verified') { setState('verified'); setNote(''); okRef.current?.(true); return }
+    setState(data?.status === 'wrong' ? 'sent' : 'ready')
+    setCode('')
+    setNote(data?.status === 'wrong' ? 'That code isn’t right. Check the text and try again.'
+      : data?.status === 'locked' ? 'Too many tries. Send a new code.'
+      : 'That code has expired. Send a new one.')
+  }
+
+  const problem = phoneProblem(phone)
+  const btn = variant === 'ca' ? 'ca-btn ca-btn-ghost ca-btn-small' : 'pt-btn is-ghost is-small'
+  const input = variant === 'ca' ? 'ca-input' : 'pt-input'
+  if (problem) return <p className="cx-phone-note is-bad" role="alert">{problem}</p>
+  if (!target || state === 'skipped' || state === 'checking') return null
+  if (state === 'verified') return <p className="cx-phone-note is-good">✓ Phone number verified</p>
+  return (
+    <div className="cx-phone-verify">
+      {state === 'sent' || state === 'verifying' ? (
+        <div className="cx-phone-row">
+          <input className={input} inputMode="numeric" autoComplete="one-time-code" maxLength={6} aria-label="6-digit code" placeholder="6-digit code" value={code} onChange={(e) => setCode(e.target.value.replace(/\D/g, '').slice(0, 6))} onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); checkCode() } }} />
+          <button type="button" className={btn} disabled={state === 'verifying'} onClick={checkCode}>{state === 'verifying' ? 'Checking…' : 'Verify'}</button>
+          <button type="button" className="cx-link" onClick={sendCode}>Resend</button>
+        </div>
+      ) : (
+        <div className="cx-phone-row">
+          <span className="cx-phone-ask">Confirm this number so we can text you.</span>
+          <button type="button" className={btn} disabled={state === 'sending'} onClick={sendCode}>{state === 'sending' ? 'Sending…' : 'Text me a code'}</button>
+        </div>
+      )}
+      {note ? <p className="cx-phone-note" role="status">{note}</p> : null}
+    </div>
+  )
+}
+
+/* ---------- Phone number with country code ---------- */
+
+// The value is one string like "+1 604-555-0123". Canada is picked by default.
+export function PhoneInput({ value, onChange, onBlur, variant = 'pt', id, ...inputProps }) {
+  const parsed = splitPhone(value)
+  const [iso, setIso] = useState(parsed.iso)
+  const country = PHONE_COUNTRIES.find((item) => item.iso === iso) || PHONE_COUNTRIES[0]
+  const national = splitPhone(value, iso).national
+  const [open, setOpen] = useState(false)
+  const [query, setQuery] = useState('')
+  const wrapRef = useRef(null)
+  const searchRef = useRef(null)
+
+  useEffect(() => {
+    if (!open) return undefined
+    const close = (event) => { if (!wrapRef.current?.contains(event.target)) setOpen(false) }
+    const key = (event) => { if (event.key === 'Escape') setOpen(false) }
+    document.addEventListener('mousedown', close)
+    document.addEventListener('keydown', key)
+    setTimeout(() => searchRef.current?.focus(), 30)
+    return () => { document.removeEventListener('mousedown', close); document.removeEventListener('keydown', key) }
+  }, [open])
+
+  const q = query.trim().toLowerCase().replace(/^\+/, '')
+  const rank = (item) => {
+    const name = item.name.toLowerCase()
+    if (name === q || item.iso.toLowerCase() === q || item.dial === q) return 0
+    if (name.startsWith(q)) return 1
+    if (name.split(/[\s(]+/).some((word) => word.startsWith(q))) return 2
+    if (item.dial.startsWith(q)) return 3
+    return name.includes(q) ? 4 : 9
+  }
+  const list = q ? PHONE_COUNTRIES.map((item) => [rank(item), item]).filter(([r]) => r < 9).sort((a, b) => a[0] - b[0]).map(([, item]) => item) : PHONE_COUNTRIES
+
+  function choose(item) {
+    setIso(item.iso); setOpen(false); setQuery('')
+    onChange(joinPhone(item.dial, national))
+  }
+
+  const inputClass = variant === 'ca' ? 'ca-input' : 'pt-input'
+  return (
+    <div ref={wrapRef} className={`cx-phone-input is-${variant}`}>
+      <input
+        id={id}
+        className={`${inputClass} cx-phone-number`}
+        type="tel"
+        autoComplete="tel-national"
+        value={national}
+        onChange={(event) => onChange(joinPhone(country.dial, event.target.value.replace(/^\+\d*\s*/, '')))}
+        onBlur={onBlur}
+        {...inputProps}
+      />
+      <button type="button" className="cx-cc-btn" aria-haspopup="listbox" aria-expanded={open} aria-label={`Country code: ${country.name} +${country.dial}`} onClick={(event) => { event.preventDefault(); setOpen(!open) }}>
+        <strong>{country.iso}</strong><span>+{country.dial}</span><svg width="12" height="12" viewBox="0 0 12 12" aria-hidden="true"><path d="M2.5 4.5 6 8l3.5-3.5" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" /></svg>
+      </button>
+      <div className={`cx-cc-menu ${open ? 'is-open' : ''}`} role="dialog" aria-label="Choose a country code" aria-hidden={!open}>
+        <input ref={searchRef} className="cx-cc-search" type="search" placeholder="Search country or code" aria-label="Search country or code" tabIndex={open ? 0 : -1} value={query} onChange={(event) => setQuery(event.target.value)} onKeyDown={(event) => { if (event.key === 'Enter') { event.preventDefault(); if (list[0]) choose(list[0]) } }} />
+        <ul className="cx-cc-list" role="listbox">
+          {list.map((item, index) => (
+            <li key={item.iso} role="option" aria-selected={item.iso === country.iso}>
+              <button type="button" tabIndex={open ? 0 : -1} className={`${item.iso === country.iso ? 'is-on' : ''} ${!q && index === 1 ? 'is-split' : ''}`} onClick={(event) => { event.preventDefault(); choose(item) }}>
+                <strong>{item.iso}</strong><span className="cx-cc-name">{item.name}</span><span className="cx-cc-dial">+{item.dial}</span>
+              </button>
+            </li>
+          ))}
+          {!list.length ? <li className="cx-cc-empty">No matches</li> : null}
+        </ul>
+      </div>
+    </div>
+  )
 }

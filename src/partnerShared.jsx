@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react'
 import { supabase } from './supabaseClient.js'
+import { OTHER_COUNTRIES, REGIONS, SERVED_COUNTRIES, cleanPostal, postalLabel, postalProblem, regionLabel } from './places.js'
 import './partner.css'
 
 export function useSession() {
@@ -109,12 +110,12 @@ export function Loading({ title }) {
   return <Shell title={title}><p className="pt-muted" role="status">Loading…</p></Shell>
 }
 
-export function Field({ label, hint, children, required }) {
+export function Field({ label, hint, children, required, error }) {
   return (
     <label className="pt-field">
       <span className="pt-label">{label}{required ? <span className="pt-req" aria-hidden="true"> *</span> : <span className="pt-muted"> · optional</span>}</span>
       {children}
-      {hint ? <span className="pt-hint">{hint}</span> : null}
+      {error ? <span className="pt-field-error" role="alert">{error}</span> : hint ? <span className="pt-hint">{hint}</span> : null}
     </label>
   )
 }
@@ -146,3 +147,74 @@ export function Notice({ kind = 'info', children }) {
 }
 
 export const BC_AREAS = ['Vancouver', 'Burnaby', 'Richmond', 'Surrey', 'Coquitlam', 'North Vancouver', 'West Vancouver', 'New Westminster', 'Delta', 'Langley', 'Port Coquitlam', 'Port Moody', 'Maple Ridge', 'White Rock', 'Victoria', 'Kelowna', 'Abbotsford', 'Other BC']
+
+/* ---------- Bakery locations (branches) ---------- */
+
+export function locationsProblem(locations) {
+  const list = locations || []
+  if (!list.length) return 'Add at least one location.'
+  for (const [i, item] of list.entries()) {
+    const n = list.length > 1 ? ` for location ${i + 1}` : ''
+    if (list.length > 1 && !String(item.name || '').trim()) return `Name location ${i + 1} (e.g. “Kitsilano” or “Main St”) so customers can tell them apart.`
+    if (!String(item.address || '').trim()) return `Add the street address${n}.`
+    if (!String(item.city || '').trim()) return `Add the city${n}.`
+    if (!String(item.province || '').trim()) return `Choose the ${regionLabel(item.country).toLowerCase()}${n}.`
+    if (!String(item.postal || '').trim()) return `Add the ${postalLabel(item.country).toLowerCase()}${n}.`
+    const bad = postalProblem(item.postal, item.country)
+    if (bad) return `Check the ${postalLabel(item.country).toLowerCase()}${n}: ${bad}`
+  }
+  return ''
+}
+
+export function LocationsEditor({ locations, onChange, newLocation }) {
+  const list = locations || []
+  const update = (index, patch) => onChange(list.map((item, i) => (i === index ? { ...item, ...patch, ...(['address', 'city', 'province', 'postal', 'country'].some((key) => key in patch) ? { lat: undefined, lng: undefined } : {}) } : item)))
+  return (
+    <div className="pt-stack">
+      <datalist id="pt-city-list">{BC_AREAS.filter((area) => area !== 'Other BC').map((area) => <option key={area} value={area} />)}</datalist>
+      {list.map((location, index) => {
+        const country = location.country || 'Canada'
+        const regions = REGIONS[country] || []
+        const postalError = postalProblem(location.postal, country)
+        return (
+          <div key={location.id} className="pt-location">
+            <div className="pt-row">
+              <strong>Location {index + 1}</strong>
+              {list.length > 1 ? <button type="button" className="pt-link-btn" onClick={() => onChange(list.filter((_, i) => i !== index))}>Remove</button> : null}
+            </div>
+            <Field label="Location name" required={list.length > 1} hint={index === 0 ? 'e.g. “Kitsilano” or “Main St”. Customers see this when choosing where to order from.' : null}>
+              <input className="pt-input" maxLength={40} value={location.name || ''} onChange={(e) => update(index, { name: e.target.value })} />
+            </Field>
+            <Field label="Street address" required hint={index === 0 ? 'Where drivers and customers pick up. Include the unit number if there is one.' : null}>
+              <input className="pt-input" autoComplete={index === 0 ? 'address-line1' : 'off'} value={location.address || ''} onChange={(e) => update(index, { address: e.target.value })} />
+            </Field>
+            <div className="pt-grid-2">
+              <Field label="City" required>
+                <input className="pt-input" list="pt-city-list" autoComplete={index === 0 ? 'address-level2' : 'off'} value={location.city || ''} onChange={(e) => update(index, { city: e.target.value })} />
+              </Field>
+              <Field label={regionLabel(country)} required>
+                <select className="pt-input" value={location.province || ''} onChange={(e) => update(index, { province: e.target.value })}>
+                  <option value="" disabled>Choose…</option>
+                  {regions.map((region) => <option key={region}>{region}</option>)}
+                </select>
+              </Field>
+            </div>
+            <div className="pt-grid-2">
+              <Field label={postalLabel(country)} required error={postalError}>
+                <input className="pt-input" autoComplete={index === 0 ? 'postal-code' : 'off'} autoCapitalize="characters" maxLength={10} value={location.postal || ''} onChange={(e) => update(index, { postal: e.target.value })} onBlur={(e) => update(index, { postal: cleanPostal(e.target.value, country) })} />
+              </Field>
+              <Field label="Country" required>
+                <select className="pt-input" value={country} onChange={(e) => update(index, { country: e.target.value, province: e.target.value === 'Canada' ? 'British Columbia' : '', postal: '' })}>
+                  {SERVED_COUNTRIES.map((name) => <option key={name}>{name}</option>)}
+                  <option disabled>──────────</option>
+                  {OTHER_COUNTRIES.map((name) => <option key={name} disabled>{name}</option>)}
+                </select>
+              </Field>
+            </div>
+          </div>
+        )
+      })}
+      <button type="button" className="pt-btn is-ghost" onClick={() => onChange([...list, newLocation()])}>+ Add another location</button>
+    </div>
+  )
+}

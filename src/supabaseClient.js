@@ -4,7 +4,20 @@ import { createClient } from '@supabase/supabase-js'
 const SUPABASE_URL = import.meta.env.VITE_SUPABASE_URL?.trim()
 const SUPABASE_ANON_KEY = import.meta.env.VITE_SUPABASE_ANON_KEY?.trim()
 
-export const supabase = SUPABASE_URL && SUPABASE_ANON_KEY ? createClient(SUPABASE_URL, SUPABASE_ANON_KEY) : null
+// Each app keeps its own sign-in, so the same person can use one email/phone as a customer and as a
+// bakery owner or driver, and signing into one app never signs them into another.
+function appArea() {
+  const path = typeof window === 'undefined' ? '/' : window.location.pathname
+  if (path.startsWith('/bakery')) return 'bakery'
+  if (path.startsWith('/driver')) return 'driver'
+  if (path.startsWith('/admin')) return 'admin'
+  return 'customer'
+}
+export const APP_AREA = appArea()
+
+export const supabase = SUPABASE_URL && SUPABASE_ANON_KEY
+  ? createClient(SUPABASE_URL, SUPABASE_ANON_KEY, { auth: { storageKey: `cake-auth-${APP_AREA}` } })
+  : null
 
 export const DOCS_BUCKET = 'partner-documents'
 

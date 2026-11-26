@@ -1,6 +1,9 @@
 import { useCallback, useEffect, useState } from 'react'
 import { friendlyError, supabase, uploadDocument } from './supabaseClient.js'
 import { BC_AREAS, Badge, Check, Field, FileField, Loading, Notice, Shell, SignInScreen, money, useSession, when } from './partnerShared.jsx'
+import { PhoneInput, PhoneVerify } from './widgets.jsx'
+import { MAKES, VEHICLES, joinVehicle, splitVehicle } from './vehicles.js'
+import { expiryProblem, licenceProblem, phoneProblem, yearProblem } from './validate.js'
 
 const TITLE = 'Deliver with us'
 // BC: app-based delivery workers get at least 120% of the general minimum wage for engaged time.
@@ -96,13 +99,34 @@ function DriverForm({ user, existing, onDone }) {
   const set = (key, value) => setForm((current) => ({ ...current, [key]: value }))
   const haveDoc = (id) => Boolean(files[id] || existing?.documents?.[id])
 
+  const today = new Date().toISOString().slice(0, 10)
+  const thisYear = new Date().getFullYear()
+  const [phoneOk, setPhoneOk] = useState(false)
+  const licenceError = licenceProblem(form.licence_number)
+  const expiryError = expiryProblem(form.licence_expiry, today)
+  const yearError = yearProblem(form.vehicle_year, thisYear)
+  const [car, setCar] = useState(() => splitVehicle(existing?.vehicle_make_model))
+  const setCarPart = (patch) => setCar((current) => {
+    const next = { ...current, ...patch }
+    set('vehicle_make_model', joinVehicle(next))
+    return next
+  })
+  const years = Array.from({ length: thisYear + 2 - 1995 }, (_, i) => String(thisYear + 1 - i))
   const missing = [
     !form.full_name.trim() && 'your full name',
     !form.phone.trim() && 'a phone number',
+    phoneProblem(form.phone) && 'a 10-digit phone number',
+    form.phone.trim() && !phoneProblem(form.phone) && !phoneOk && 'a verified phone number (tap “Text me a code”)',
+    licenceError && 'a valid licence number',
+    expiryError && 'a licence that hasn’t expired',
+    yearError && 'a valid vehicle year',
     !form.over_19 && 'confirmation you are 19 or older',
     !form.licence_number.trim() && 'your licence number',
     !form.licence_expiry && 'your licence expiry date',
-    !form.vehicle_make_model.trim() && 'your vehicle',
+    !car.make && 'your vehicle make',
+    car.make === 'Other' && !car.otherMake.trim() && 'your vehicle make',
+    car.make && car.make !== 'Other' && !car.model && 'your vehicle model',
+    (car.make === 'Other' || car.model === 'Other') && !car.otherModel.trim() && 'your vehicle model',
     !form.insurance_confirmed && 'confirmation your insurance covers deliveries',
     !form.background_check_consent && 'consent to a background check',
     ...DOCS.filter((doc) => doc.required && !haveDoc(doc.id)).map((doc) => doc.label.toLowerCase()),
@@ -157,7 +181,8 @@ function DriverForm({ user, existing, onDone }) {
       <section className="pt-card pt-stack">
         <h2 className="pt-h2">About you</h2>
         <Field label="Full legal name" required><input className="pt-input" autoComplete="name" value={form.full_name} onChange={(e) => set('full_name', e.target.value)} /></Field>
-        <Field label="Mobile number" required hint="We text you about jobs and approvals."><input className="pt-input" type="tel" autoComplete="tel" value={form.phone} onChange={(e) => set('phone', e.target.value)} /></Field>
+        <Field label="Mobile number" required hint="We text you about jobs and approvals."><PhoneInput value={form.phone} onChange={(phone) => set('phone', phone)} /></Field>
+        <PhoneVerify phone={form.phone} onOkChange={setPhoneOk} />
         <Field label="Where you’ll deliver" required>
           <select className="pt-input" value={form.city} onChange={(e) => set('city', e.target.value)}>{BC_AREAS.map((area) => <option key={area}>{area}</option>)}</select>
         </Field>
@@ -170,9 +195,9 @@ function DriverForm({ user, existing, onDone }) {
           <Field label="Licence class" required>
             <select className="pt-input" value={form.licence_class} onChange={(e) => set('licence_class', e.target.value)}>{['Class 5', 'Class 4', 'Class 1', 'Class 2', 'Class 3', 'Class 7 (N)'].map((c) => <option key={c}>{c}</option>)}</select>
           </Field>
-          <Field label="Expiry date" required><input className="pt-input" type="date" value={form.licence_expiry} onChange={(e) => set('licence_expiry', e.target.value)} /></Field>
+          <Field label="Expiry date" required error={expiryError}><input className="pt-input" type="date" min={today} value={form.licence_expiry} onChange={(e) => set('licence_expiry', e.target.value)} /></Field>
         </div>
-        <Field label="Licence number" required><input className="pt-input" value={form.licence_number} onChange={(e) => set('licence_number', e.target.value)} /></Field>
+        <Field label="Licence number" required error={licenceError} hint="7 digits, on the front of your BC licence."><input className="pt-input" inputMode="numeric" maxLength={9} value={form.licence_number} onChange={(e) => set('licence_number', e.target.value.replace(/[^\d\s-]/g, ''))} /></Field>
       </section>
 
       <section className="pt-card pt-stack">
@@ -182,9 +207,35 @@ function DriverForm({ user, existing, onDone }) {
           <Field label="Type" required>
             <select className="pt-input" value={form.vehicle_type} onChange={(e) => set('vehicle_type', e.target.value)}>{['Car', 'SUV', 'Minivan', 'Van', 'Pickup truck'].map((c) => <option key={c}>{c}</option>)}</select>
           </Field>
-          <Field label="Year"><input className="pt-input" inputMode="numeric" maxLength={4} value={form.vehicle_year} onChange={(e) => set('vehicle_year', e.target.value.replace(/\D/g, ''))} /></Field>
+          <Field label="Year" error={yearError}>
+            <select className="pt-input" value={form.vehicle_year || ''} onChange={(e) => set('vehicle_year', e.target.value)}>
+              <option value="">Choose year</option>
+              {years.map((year) => <option key={year}>{year}</option>)}
+            </select>
+          </Field>
         </div>
-        <Field label="Make and model" required><input className="pt-input" placeholder="e.g. Toyota Corolla" value={form.vehicle_make_model} onChange={(e) => set('vehicle_make_model', e.target.value)} /></Field>
+        <div className="pt-grid-2">
+          <Field label="Make" required>
+            <select className="pt-input" value={car.make} onChange={(e) => setCarPart({ make: e.target.value, model: '', otherModel: '' })}>
+              <option value="" disabled>Choose make</option>
+              {MAKES.map((make) => <option key={make}>{make}</option>)}
+              <option value="Other">Other (not listed)</option>
+            </select>
+          </Field>
+          <Field label="Model" required>
+            {car.make === 'Other' ? (
+              <input className="pt-input" placeholder="Model" value={car.otherModel} onChange={(e) => setCarPart({ otherModel: e.target.value })} />
+            ) : (
+              <select className="pt-input" value={car.model} disabled={!car.make} onChange={(e) => setCarPart({ model: e.target.value, otherModel: '' })}>
+                <option value="" disabled>{car.make ? 'Choose model' : 'Choose make first'}</option>
+                {(VEHICLES[car.make] || []).map((model) => <option key={model}>{model}</option>)}
+                {car.make ? <option value="Other">Other (not listed)</option> : null}
+              </select>
+            )}
+          </Field>
+        </div>
+        {car.make === 'Other' ? <Field label="Make name" required><input className="pt-input" placeholder="e.g. Fiat" value={car.otherMake} onChange={(e) => setCarPart({ otherMake: e.target.value })} /></Field> : null}
+        {car.make && car.make !== 'Other' && car.model === 'Other' ? <Field label="Model name" required><input className="pt-input" placeholder={`Your ${car.make} model`} value={car.otherModel} onChange={(e) => setCarPart({ otherModel: e.target.value })} /></Field> : null}
         <Check checked={form.fits_large_cakes} onChange={(v) => set('fits_large_cakes', v)}>A large flat box (about 40 × 40 × 30 cm) fits flat in my trunk or on a level seat. Needed for tiered and wedding cakes.</Check>
         <Check checked={form.has_ac} onChange={(v) => set('has_ac', v)}>My vehicle has working air conditioning.</Check>
       </section>

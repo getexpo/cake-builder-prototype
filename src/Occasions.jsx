@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from 'react'
 import { friendlyError, supabase } from './supabaseClient.js'
 import { dateLabel, vanDate } from './schedule.js'
+import { PhoneInput, PhoneVerify } from './widgets.jsx'
 import {
   HOLIDAY_KINDS, KIND_LABEL, OCCASION_GROUPS, QUICK_HOLIDAYS, RELATIONS, REMIND_OPTIONS,
   countdown, daysBetween, holidayDate, nextDate, occasionTitle, turningAge,
@@ -265,7 +266,8 @@ export function OccasionsScreen({ user, phone, onBack, onShop, onSignIn, TopBar,
         {settings ? (
           <section className="ca-stack-8">
             <h2 className="ca-h3">How we remind you</h2>
-            <input className="ca-input" type="tel" autoComplete="tel" aria-label="Phone for text reminders" placeholder="Phone for text reminders" value={settings.phone} onChange={(e) => setSettings({ ...settings, phone: e.target.value })} onBlur={() => saveProfile()} />
+            <PhoneInput variant="ca" aria-label="Phone for text reminders" placeholder="Phone for text reminders" value={settings.phone || ''} onChange={(phone) => setSettings({ ...settings, phone })} onBlur={() => saveProfile()} />
+            <PhoneVerify variant="ca" phone={settings.phone} />
             {[['sms_reminders', 'Text message', 'To your phone above'], ['email_reminders', 'Email', user.email]].map(([key, label, sub]) => (
               <div key={key} className="ca-setting-row">
                 <span className="ca-list-text"><strong>{label}</strong><span className="ca-muted ca-small">{sub}</span></span>

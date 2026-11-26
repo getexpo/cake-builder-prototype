@@ -290,3 +290,12 @@
 .ca-date-input { appearance: none; -webkit-appearance: none; display: block; }
 .ca-swatch.is-rainbow { background: conic-gradient(#F87171, #FBBF24, #34D399, #60A5FA, #A78BFA, #F87171); }
 .ca-size small { display: block; font-size: 12px; color: var(--muted, #78716C); font-weight: 600; }
+/* bakery locations */
+.ca-loc-list { display: flex; flex-direction: column; gap: 8px; }
+.ca-loc { display: flex; align-items: center; gap: 12px; width: 100%; min-height: 64px; padding: 10px 14px; border: 1px solid var(--line); border-radius: 14px; background: #FFFFFF; text-align: left; color: var(--ink); }
+.ca-loc.is-on { border: 2px solid var(--accent); background: var(--accent-wash); padding: 9px 13px; }
+.ca-loc-dot { width: 20px; height: 20px; flex: none; border-radius: 50%; border: 2px solid #A8A29E; }
+.ca-loc.is-on .ca-loc-dot { border-color: var(--accent); box-shadow: inset 0 0 0 4px #FFFFFF; background: var(--accent); }
+.ca-loc-text { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px; }
+.ca-loc-km { display: flex; flex-direction: column; align-items: flex-end; gap: 4px; flex: none; font-weight: 700; }
+.ca-loc-nearest { padding: 2px 8px; border-radius: 999px; background: #DCFCE7; color: #166534; font-size: 12px; font-weight: 800; }

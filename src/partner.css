@@ -141,3 +141,5 @@ textarea.pt-input { min-height: 72px; resize: vertical; }
 .pt-swatch { width: 16px; height: 16px; border-radius: 50%; border: 1px solid rgba(0,0,0,0.12); flex: none; }
 .pt-group-title { font-weight: 800; max-width: 320px; }
 .pt-serves { width: 84px; min-height: 36px !important; padding: 0 8px; font-weight: 500; margin-left: auto; }
+.pt-field-error { font-size: 13px; color: #991B1B; font-weight: 600; }
+.pt-location { display: flex; flex-direction: column; gap: 12px; padding: 14px; border: 1px solid var(--line); border-radius: 14px; background: #FFFFFF; }

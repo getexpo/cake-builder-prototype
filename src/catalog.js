@@ -43,6 +43,12 @@ export const SHOPS = [
     id: 'shop-1',
     name: 'Maple & Crumb Cake Co.',
     area: 'Kitsilano',
+    address: '2150 W 4th Ave',
+    locations: [
+      { id: 'mc-kits', name: 'Kitsilano', address: '2150 W 4th Ave', city: 'Vancouver', lat: 49.2683, lng: -123.1566 },
+      { id: 'mc-main', name: 'Main Street', address: '4180 Main St', city: 'Vancouver', lat: 49.2475, lng: -123.1010 },
+      { id: 'mc-metro', name: 'Metrotown', address: '4700 Kingsway', city: 'Burnaby', lat: 49.2276, lng: -123.0003 },
+    ],
     category: 'cakes',
     tagline: 'Birthday and celebration layer cakes',
     leadHours: 24,

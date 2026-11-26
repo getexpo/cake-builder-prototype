@@ -3,7 +3,9 @@ import { CATEGORIES, SHOPS } from './catalog.js'
 import { cakeOptions } from './builderLibrary.js'
 import { friendlyError, supabase } from './supabaseClient.js'
 import { STATUS_HINT, addDays, dateLabel, dayStatus, earliestDay, leadFor, noticeLabel, timeLabel, timesOn, vanDate, vanMoment } from './schedule.js'
-import { ChatThread, ConversationList, MonthCalendar, useConversations } from './widgets.jsx'
+import { ChatThread, ConversationList, MonthCalendar, PhoneInput, PhoneVerify, useConversations } from './widgets.jsx'
+import { phoneProblem } from './validate.js'
+import { distanceKm, geocode, kmLabel, shopLocations } from './geo.js'
 import { OccasionsScreen, dismissPrompt, promptDismissed, upcoming, useOccasions } from './Occasions.jsx'
 import { countdown, occasionTitle } from './occasions.js'
 import './customer.css'
@@ -68,7 +70,7 @@ function liveShopFromRow(row) {
   return {
     id: row.id, name: row.name, area: row.area, address: row.address, category: row.category,
     tagline: row.tagline || 'New on the app', leadHours: row.lead_hours || 24, tint: row.tint || '#F3E8E2', icon: row.icon || 'cake',
-    closedDays: row.closed_days || [], blockedDates: row.blocked_dates || [], dailyCapacity: row.daily_capacity || null, pickupTimes: row.pickup_times || null,
+    locations: row.locations || [], closedDays: row.closed_days || [], blockedDates: row.blocked_dates || [], dailyCapacity: row.daily_capacity || null, pickupTimes: row.pickup_times || null,
     builder: row.builder && Object.keys(row.builder).length ? row.builder : SHOPS[0].builder,
     menu: (row.menu || []).map((item) => ({ ...item, price: Number(item.price) || 0, leadHours: Number(item.leadHours) || 0 })), live: true,
   }
@@ -382,6 +384,9 @@ export default function CustomerApp({ ctx }) {
   const [sbUser, setSbUser] = useState(null)
   const [myOrders, setMyOrders] = useState([])
   const [details, setDetails] = useState(readDetails)
+  const [origin, setOrigin] = useState(null) // { lat, lng, label }
+  const [locating, setLocating] = useState(false)
+  const [pickedLocation, setPickedLocation] = useState(() => { try { return JSON.parse(window.localStorage.getItem('picked-location') || '{}') } catch { return {} } })
   const [checkout, setCheckout] = useState({ times: {}, addressId: '', line1: '', city: 'Vancouver', instructions: '', phone: '', tip: 4, notes: '', cardId: '', cardName: '', cardLast4: '', placing: false, error: '' })
   const [build, setBuild] = useState(() => newBuild(SHOPS.find((item) => item.id === customerShopId) || SHOPS[0]))
   const [custom, setCustom] = useState(() => newCustom(SHOPS.find((item) => item.id === customerShopId) || SHOPS[0]))
@@ -465,6 +470,72 @@ export default function CustomerApp({ ctx }) {
     const timer = setInterval(loadOrders, 15000)
     return () => clearInterval(timer)
   }, [loadOrders, sbUser, view, placedIds.length])
+
+  // Where distances are measured from: the customer's saved address, or their device location if they tap the button.
+  const homeAddress = details.addresses[0]
+  useEffect(() => {
+    if (!homeAddress?.line1 || origin?.from === 'device') return undefined
+    let live = true
+    geocode(homeAddress.line1, homeAddress.city).then((point) => { if (live && point) setOrigin({ ...point, from: 'address', label: homeAddress.line1 }) })
+    return () => { live = false }
+  }, [homeAddress?.line1, homeAddress?.city]) // eslint-disable-line react-hooks/exhaustive-deps
+
+  function locateMe() {
+    if (!navigator.geolocation) return
+    setLocating(true)
+    navigator.geolocation.getCurrentPosition(
+      (pos) => { setOrigin({ lat: pos.coords.latitude, lng: pos.coords.longitude, from: 'device', label: 'your location' }); setLocating(false) },
+      () => setLocating(false),
+      { enableHighAccuracy: false, timeout: 10000, maximumAge: 600000 },
+    )
+  }
+
+  function locationsWithDistance(shop) {
+    const list = shopLocations(shop).map((item) => ({ ...item, km: distanceKm(origin, item) }))
+    const known = list.filter((item) => item.km != null)
+    const nearestId = known.length ? known.reduce((a, b) => (b.km < a.km ? b : a)).id : null
+    return list.map((item) => ({ ...item, nearest: list.length > 1 && item.id === nearestId }))
+  }
+
+  function chosenLocation(shop) {
+    const list = locationsWithDistance(shop)
+    return list.find((item) => item.id === pickedLocation[shop.id]) || list.find((item) => item.nearest) || list[0]
+  }
+
+  function pickLocation(shopId, locationId) {
+    const next = { ...pickedLocation, [shopId]: locationId }
+    setPickedLocation(next)
+    try { window.localStorage.setItem('picked-location', JSON.stringify(next)) } catch { /* ignore */ }
+  }
+
+  function renderLocationPicker(shop) {
+    const list = locationsWithDistance(shop)
+    if (list.length < 2) return null
+    const chosen = chosenLocation(shop)
+    return (
+      <div className="ca-stack-8">
+        <div className="ca-row-between">
+          <h2 className="ca-h3">Choose a location</h2>
+          {!origin ? <button type="button" className="ca-link" disabled={locating} onClick={locateMe}>{locating ? 'Finding you…' : 'Use my location'}</button> : <span className="ca-muted ca-small">From {origin.label}</span>}
+        </div>
+        <div className="ca-loc-list" role="radiogroup" aria-label={`${shop.name} locations`}>
+          {list.map((item) => (
+            <button key={item.id} type="button" role="radio" aria-checked={chosen.id === item.id} className={`ca-loc ${chosen.id === item.id ? 'is-on' : ''}`} onClick={() => pickLocation(shop.id, item.id)}>
+              <span className="ca-loc-dot" aria-hidden="true" />
+              <span className="ca-loc-text">
+                <strong>{item.name || item.city}</strong>
+                <span className="ca-muted ca-small">{[item.address, item.city].filter(Boolean).join(', ')}</span>
+              </span>
+              <span className="ca-loc-km">
+                {item.nearest ? <span className="ca-loc-nearest">Nearest</span> : null}
+                {item.km != null ? <span className="ca-small">{kmLabel(item.km)}</span> : null}
+              </span>
+            </button>
+          ))}
+        </div>
+      </div>
+    )
+  }
 
   function saveDetails(next) {
     setDetails(next)
@@ -719,6 +790,7 @@ export default function CustomerApp({ ctx }) {
             <span className="ca-muted">{bakery.tagline}</span>
           </div>
           <button type="button" className="ca-btn ca-btn-ghost" onClick={() => openChat(bakery, 'bakery')}><Icon name="chat" size={18} />Message {bakery.name}</button>
+          {renderLocationPicker(bakery)}
         </div>
         <div className="ca-pad ca-section">
           <h2 className="ca-h2">Menu</h2>
@@ -1170,6 +1242,7 @@ export default function CustomerApp({ ctx }) {
       )
     }
     const shop = cartShop || bakery
+    const pickupFrom = chosenLocation(shop)
     const delivery = ctx.fulfillmentType === 'delivery'
     const setC = (patch) => setCheckout((current) => ({ ...current, ...patch, error: '' }))
     const savedAddress = details.addresses.find((item) => item.id === checkout.addressId)
@@ -1194,7 +1267,7 @@ export default function CustomerApp({ ctx }) {
     const sum = (key) => Math.round(groups.reduce((acc, group) => acc + group[key], 0) * 100) / 100
     const many = groups.length > 1
     const timesMissing = groups.some((group) => !group.date || !group.time)
-    const blocker = !signedIn ? '' : timesMissing ? 'Pick a date and time for every item' : delivery && !address.line1 ? 'Add a delivery address' : !phone ? 'Add a phone number' : card.last4.length !== 4 ? 'Add a card' : ''
+    const blocker = !signedIn ? '' : timesMissing ? 'Pick a date and time for every item' : delivery && !address.line1 ? 'Add a delivery address' : !phone ? 'Add a phone number' : phoneProblem(phone) ? 'Enter a 10-digit phone number' : !checkout.phoneOk ? 'Confirm your phone number: tap “Text me a code”' : card.last4.length !== 4 ? 'Add a card' : ''
 
     function setItemDate(itemId, date) {
       setCart(cart.map((item) => (item.id === itemId ? { ...item, date } : item)))
@@ -1221,8 +1294,8 @@ export default function CustomerApp({ ctx }) {
           customer_phone: phone,
           bakery_id: shop.id,
           bakery_name: shop.name,
-          bakery_area: shop.area,
-          bakery_address: shop.address || null,
+          bakery_area: pickupFrom.city || shop.area,
+          bakery_address: (shopLocations(shop).length > 1 && pickupFrom.name ? `${pickupFrom.address} (${pickupFrom.name})` : pickupFrom.address) || shop.address || null,
           items,
           subtotal: group.subtotal,
           delivery_fee: group.deliveryFee,
@@ -1360,9 +1433,12 @@ export default function CustomerApp({ ctx }) {
             </section>
           ) : null}
 
+          {shopLocations(shop).length > 1 ? <section className="ca-stack-8">{renderLocationPicker(shop)}</section> : null}
+
           <section className="ca-stack-8">
             <h2 className="ca-h3">Phone</h2>
-            <input className="ca-input" type="tel" autoComplete="tel" aria-label="Phone number" placeholder={delivery ? 'So the driver can reach you' : 'So the bakery can reach you'} value={checkout.phone || details.phone} onChange={(event) => setC({ phone: event.target.value })} />
+            <PhoneInput variant="ca" aria-label="Phone number" placeholder={delivery ? 'So the driver can reach you' : 'So the bakery can reach you'} value={checkout.phone || details.phone} onChange={(phone) => setC({ phone })} />
+            <PhoneVerify variant="ca" phone={checkout.phone || details.phone} onOkChange={(ok) => setCheckout((current) => (current.phoneOk === ok ? current : { ...current, phoneOk: ok }))} />
           </section>
 
           {delivery ? (

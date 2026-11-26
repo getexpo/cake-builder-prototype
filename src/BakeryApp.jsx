@@ -1,18 +1,20 @@
 import { useCallback, useEffect, useState } from 'react'
 import { CATEGORIES, SHOPS } from './catalog.js'
 import { friendlyError, supabase, uploadDocument } from './supabaseClient.js'
-import { BC_AREAS, Badge, Check, Field, FileField, Loading, Notice, Shell, SignInScreen, money, useSession, when } from './partnerShared.jsx'
+import { Badge, Check, Field, FileField, LocationsEditor, Loading, Notice, Shell, SignInScreen, locationsProblem, money, useSession, when } from './partnerShared.jsx'
+import { newLocation, shopLocations, withCoordinates } from './geo.js'
 import { DEFAULT_TIMES, NOTICE_OPTIONS, WEEKDAYS, dateLabel, timeLabel, vanDate, weekday } from './schedule.js'
 import { LIBRARY, cakeOptions } from './builderLibrary.js'
-import { ChatThread, ConversationList, MonthCalendar, useConversations } from './widgets.jsx'
+import { ChatThread, ConversationList, MonthCalendar, PhoneInput, PhoneVerify, useConversations } from './widgets.jsx'
+import { cleanPermit, permitProblem, phoneProblem } from './validate.js'
 
 const TITLE = 'Sell your cakes'
 const SHOP_TYPES = CATEGORIES.filter((item) => item.id !== 'all')
 
 const DOCS = [
   { id: 'food_permit', label: 'Food premises permit', required: true, hint: 'From your health authority (e.g. Vancouver Coastal Health or Fraser Health).' },
-  { id: 'business_licence', label: 'City business licence', required: false },
-  { id: 'storefront', label: 'Photo of your kitchen or storefront', required: false },
+  { id: 'business_licence', label: 'City business licence', required: true, hint: 'From your city or municipality (home-based bakeries need one too).' },
+  { id: 'storefront', label: 'Photo of your kitchen or storefront', required: true, hint: 'A clear photo of where your cakes are made.' },
 ]
 
 export function templateFor(category) {
@@ -92,19 +94,25 @@ function BakeryForm({ user, existing, onDone }) {
   const [form, setForm] = useState(() => ({
     business_name: '', contact_name: user.user_metadata?.full_name || '', phone: '', address: '', city: 'Vancouver',
     category: 'cakes', description: '', food_permit_number: '', agree: false, ...(existing || {}),
+    locations: existing?.locations?.length ? existing.locations : [{ ...newLocation(), name: '', address: existing?.address || '', city: existing?.city || 'Vancouver' }],
   }))
   const [files, setFiles] = useState({})
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState('')
   const set = (key, value) => setForm((current) => ({ ...current, [key]: value }))
   const haveDoc = (id) => Boolean(files[id] || existing?.documents?.[id])
+  const [phoneOk, setPhoneOk] = useState(false)
+  const permitError = permitProblem(form.food_permit_number)
 
   const missing = [
     !form.business_name.trim() && 'your bakery’s name',
     !form.contact_name.trim() && 'a contact name',
     !form.phone.trim() && 'a phone number',
-    !form.address.trim() && 'your street address',
+    phoneProblem(form.phone) && 'a 10-digit phone number',
+    form.phone.trim() && !phoneProblem(form.phone) && !phoneOk && 'a verified phone number (tap “Text me a code”)',
+    locationsProblem(form.locations) && 'a name and street address for each location',
     !form.food_permit_number?.trim() && 'your food permit number',
+    permitError && 'a valid food permit number',
     ...DOCS.filter((doc) => doc.required && !haveDoc(doc.id)).map((doc) => `a copy of your ${doc.label.toLowerCase()}`),
     !form.agree && !existing && 'agreement to the partner terms',
   ].filter(Boolean)
@@ -118,11 +126,12 @@ function BakeryForm({ user, existing, onDone }) {
       for (const doc of DOCS) {
         if (files[doc.id]) documents[doc.id] = await uploadDocument(user.id, doc.id, files[doc.id])
       }
+      const locations = await withCoordinates(form.locations.map((item) => ({ ...item, name: item.name.trim(), address: item.address.trim() })))
       const row = {
         user_id: user.id, status: 'pending', email: user.email,
         business_name: form.business_name.trim(), contact_name: form.contact_name.trim(), phone: form.phone.trim(),
-        address: form.address.trim(), city: form.city, category: form.category, description: form.description.trim(),
-        food_permit_number: form.food_permit_number.trim(), documents,
+        locations, address: locations[0].address, city: locations[0].city, category: form.category, description: form.description.trim(),
+        food_permit_number: cleanPermit(form.food_permit_number), documents,
       }
       const query = existing ? supabase.from('bakery_applications').update(row).eq('id', existing.id) : supabase.from('bakery_applications').insert(row)
       const { error: err } = await query
@@ -147,19 +156,22 @@ function BakeryForm({ user, existing, onDone }) {
           <select className="pt-input" value={form.category} onChange={(e) => set('category', e.target.value)}>{SHOP_TYPES.map((item) => <option key={item.id} value={item.id}>{item.label}</option>)}</select>
         </Field>
         <Field label="One line about your bakery" hint="Shown to customers, e.g. “Japanese-style fresh cream cakes”."><input className="pt-input" maxLength={90} value={form.description} onChange={(e) => set('description', e.target.value)} /></Field>
-        <Field label="Street address" required hint="Where drivers and customers pick up."><input className="pt-input" autoComplete="street-address" value={form.address} onChange={(e) => set('address', e.target.value)} /></Field>
-        <Field label="City" required>
-          <select className="pt-input" value={form.city} onChange={(e) => set('city', e.target.value)}>{BC_AREAS.map((area) => <option key={area}>{area}</option>)}</select>
-        </Field>
+      </section>
+
+      <section className="pt-card pt-stack">
+        <h2 className="pt-h2">Locations</h2>
+        <p className="pt-muted">Add each shop or kitchen customers can order from. If you have more than one, customers pick the one they want and we show them the nearest.</p>
+        <LocationsEditor locations={form.locations} onChange={(locations) => set('locations', locations)} newLocation={newLocation} />
       </section>
       <section className="pt-card pt-stack">
         <h2 className="pt-h2">Contact</h2>
         <Field label="Contact name" required><input className="pt-input" autoComplete="name" value={form.contact_name} onChange={(e) => set('contact_name', e.target.value)} /></Field>
-        <Field label="Phone" required><input className="pt-input" type="tel" autoComplete="tel" value={form.phone} onChange={(e) => set('phone', e.target.value)} /></Field>
+        <Field label="Phone" required hint="We text you about orders and your application."><PhoneInput value={form.phone} onChange={(phone) => set('phone', phone)} /></Field>
+        <PhoneVerify phone={form.phone} onOkChange={setPhoneOk} />
       </section>
       <section className="pt-card pt-stack">
         <h2 className="pt-h2">Permits</h2>
-        <Field label="Food premises permit number" required><input className="pt-input" value={form.food_permit_number || ''} onChange={(e) => set('food_permit_number', e.target.value)} /></Field>
+        <Field label="Food premises permit number" required error={permitError} hint="As printed on your health permit, e.g. 253639 or FH-12345."><input className="pt-input" autoCapitalize="characters" spellCheck={false} maxLength={30} value={form.food_permit_number || ''} onChange={(e) => set('food_permit_number', e.target.value)} onBlur={(e) => set('food_permit_number', cleanPermit(e.target.value))} /></Field>
         {DOCS.map((doc) => (
           <div key={doc.id}>
             <FileField label={doc.label} hint={doc.hint} required={doc.required} value={files[doc.id]} onChange={(file) => setFiles((current) => ({ ...current, [doc.id]: file }))} />
@@ -349,20 +361,26 @@ function MenuEditor({ bakery, onSaved }) {
 }
 
 function ShopSettings({ bakery, onSaved }) {
-  const [form, setForm] = useState({ name: bakery.name, tagline: bakery.tagline, address: bakery.address, area: bakery.area, phone: bakery.phone || '', lead_hours: bakery.lead_hours, active: bakery.active, closed_days: bakery.closed_days || [], pickup_times: bakery.pickup_times?.length ? bakery.pickup_times : DEFAULT_TIMES, daily_capacity: bakery.daily_capacity ?? '' })
+  const [form, setForm] = useState({ name: bakery.name, tagline: bakery.tagline, address: bakery.address, area: bakery.area, phone: bakery.phone || '', lead_hours: bakery.lead_hours, active: bakery.active, closed_days: bakery.closed_days || [], pickup_times: bakery.pickup_times?.length ? bakery.pickup_times : DEFAULT_TIMES, daily_capacity: bakery.daily_capacity ?? '', locations: bakery.locations?.length ? bakery.locations : shopLocations({ address: bakery.address, area: bakery.area }).map((item) => ({ ...item, id: newLocation().id, name: '' })) })
   const [newTime, setNewTime] = useState('11:00')
   const [busy, setBusy] = useState(false)
   const [message, setMessage] = useState('')
   const [error, setError] = useState('')
   const set = (key, value) => setForm((current) => ({ ...current, [key]: value }))
   const ready = (bakery.builder && Object.keys(bakery.builder).length) || (bakery.menu || []).length
+  const [phoneOk, setPhoneOk] = useState(false)
 
   async function save() {
     setBusy(true); setMessage(''); setError('')
+    if (phoneProblem(form.phone)) { setBusy(false); setError('Enter a 10-digit shop phone number.'); return }
+    if (form.phone.trim() && !phoneOk) { setBusy(false); setError('Confirm the shop phone first: tap “Text me a code”.'); return }
     const template = templateFor(bakery.category)
     if (!form.pickup_times.length) { setBusy(false); setError('Add at least one pickup time.'); return }
     if (form.closed_days.length === 7) { setBusy(false); setError('Leave at least one day open.'); return }
-    const patch = { ...form, lead_hours: Math.max(1, Number(form.lead_hours) || 24), daily_capacity: Number(form.daily_capacity) > 0 ? Math.round(Number(form.daily_capacity)) : null, pickup_times: [...form.pickup_times].sort() }
+    const placeProblem = locationsProblem(form.locations)
+    if (placeProblem) { setBusy(false); setError(placeProblem); return }
+    const locations = await withCoordinates(form.locations.map((item) => ({ ...item, name: String(item.name || '').trim(), address: item.address.trim() })))
+    const patch = { ...form, locations, address: locations[0].address, area: locations[0].city, lead_hours: Math.max(1, Number(form.lead_hours) || 24), daily_capacity: Number(form.daily_capacity) > 0 ? Math.round(Number(form.daily_capacity)) : null, pickup_times: [...form.pickup_times].sort() }
     if (!bakery.builder || !Object.keys(bakery.builder).length) Object.assign(patch, { builder: template.builder, icon: template.icon, tint: template.tint })
     const { error: err } = await supabase.from('bakeries').update(patch).eq('id', bakery.id)
     setBusy(false)
@@ -375,13 +393,18 @@ function ShopSettings({ bakery, onSaved }) {
       <section className="pt-card pt-stack">
         <Field label="Shop name" required><input className="pt-input" value={form.name} onChange={(e) => set('name', e.target.value)} /></Field>
         <Field label="One line about your shop"><input className="pt-input" maxLength={90} value={form.tagline} onChange={(e) => set('tagline', e.target.value)} /></Field>
-        <Field label="Pickup address" required><input className="pt-input" value={form.address} onChange={(e) => set('address', e.target.value)} /></Field>
-        <Field label="City" required><select className="pt-input" value={form.area} onChange={(e) => set('area', e.target.value)}>{BC_AREAS.map((area) => <option key={area}>{area}</option>)}</select></Field>
-        <Field label="Shop phone" hint="We text new orders and customer messages to this number."><input className="pt-input" type="tel" value={form.phone} onChange={(e) => set('phone', e.target.value)} /></Field>
+        <Field label="Shop phone" hint="We text new orders and customer messages to this number."><PhoneInput value={form.phone} onChange={(phone) => set('phone', phone)} /></Field>
+        <PhoneVerify phone={form.phone} onOkChange={setPhoneOk} />
         <Field label="How much notice you need (hours)" required hint="Customers can only choose pickup times after this. 24 = next day, 336 = 2 weeks.">
           <input className="pt-input" type="number" min={1} value={form.lead_hours} onChange={(e) => set('lead_hours', e.target.value)} />
         </Field>
         <Check checked={form.active} onChange={(v) => set('active', v)}>Show my shop to customers</Check>
+      </section>
+
+      <section className="pt-card pt-stack">
+        <h2 className="pt-h2">Locations</h2>
+        <p className="pt-muted">Customers choose which location to order from. The one closest to them is marked “Nearest”.</p>
+        <LocationsEditor locations={form.locations} onChange={(locations) => set('locations', locations)} newLocation={newLocation} />
       </section>
       <section className="pt-card pt-stack">
         <h2 className="pt-h2">Days and times</h2>
