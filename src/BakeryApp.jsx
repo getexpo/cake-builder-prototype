@@ -262,6 +262,12 @@ function BakeryDashboard({ user, bakery, application, onSaved }) {
 
   return (
     <Shell title={bakery.name} user={user} tabs={tabs} tab={tab} onTab={setTab} wide>
+      {payout !== undefined && !payout?.bank_last4 && tab !== 'payouts' && tab !== 'setup' ? (
+        <div className="pt-pay-banner">
+          <span><strong>Add your bank details to get paid.</strong> We send your earnings by direct deposit every week.</span>
+          <button type="button" className="pt-btn is-small" onClick={() => setTab('payouts')}>Add bank details</button>
+        </div>
+      ) : null}
       {!bakery.active && tab !== 'setup' ? <Notice>Your shop isn’t live yet. <button type="button" className="pt-link-btn" onClick={() => setTab('setup')}>See what’s left</button></Notice> : null}
       {tab === 'setup' ? (
         <SetupChecklist
@@ -320,7 +326,8 @@ function BakeryDashboard({ user, bakery, application, onSaved }) {
 
 function MenuEditor({ bakery, onSaved }) {
   const hasBuilder = bakery.builder && Object.keys(bakery.builder).length
-  const [builder, setBuilder] = useState(() => withOptions(hasBuilder ? bakery.builder : templateFor(bakery.category).builder))
+  // Customers only build custom cakes, so every bakery uses the cake builder.
+  const [builder, setBuilder] = useState(() => withOptions({ ...(hasBuilder && bakery.builder.kind === 'cake' ? bakery.builder : templateFor('cakes').builder), kind: 'cake', noun: 'cake' }))
   const [items, setItems] = useState(() => (bakery.menu || []).map((item) => ({ ...item })))
   const [busy, setBusy] = useState(false)
   const [message, setMessage] = useState('')
@@ -344,15 +351,8 @@ function MenuEditor({ bakery, onSaved }) {
   return (
     <div className="pt-stack">
       <section className="pt-card pt-stack">
-        <h2 className="pt-h2">Build-your-own item</h2>
-        <p className="pt-muted">Customers see “Build your own {builder.noun || 'cake'}” at the top of your menu.</p>
-        <Field label="Start from a template" required>
-          <select className="pt-input" defaultValue="" onChange={(e) => { if (e.target.value) setBuilder(withOptions(templateFor(e.target.value).builder)) }}>
-            <option value="">Keep current options</option>
-            {SHOP_TYPES.map((item) => <option key={item.id} value={item.id}>{item.label}</option>)}
-          </select>
-        </Field>
-        <Field label="What customers build" required hint="e.g. cake, cupcakes, donut box"><input className="pt-input" value={builder.noun || ''} onChange={(e) => setBuilder((current) => ({ ...current, noun: e.target.value }))} /></Field>
+        <h2 className="pt-h2">Custom cakes</h2>
+        <p className="pt-muted">Customers see “Build your own cake” at the top of your menu and choose from the options you tick below.</p>
         <Field label="Notice needed for custom orders" hint={`Customers can't pick dates sooner than this. Your shop default is ${Math.round(bakery.lead_hours / 24) || 1} day(s).`}>
           <NoticeSelect value={builder.leadHours || 0} onChange={(hours) => setBuilder((current) => ({ ...current, leadHours: hours }))} />
         </Field>

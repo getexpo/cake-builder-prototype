@@ -337,7 +337,12 @@ function DriverWork({ user, application }) {
         />
       ) : null}
       {tab === 'payouts' ? <PayoutSetup summary={payout} allowBusinessNumber={false} onSaved={async () => { await reloadPayout(); setTab('jobs') }} /> : null}
-      {tab === 'jobs' && needsPayout ? <Notice>Add your bank details to start accepting jobs. <button type="button" className="pt-link-btn" onClick={() => setTab('payouts')}>Add them now</button></Notice> : null}
+      {needsPayout && tab !== 'payouts' && tab !== 'setup' ? (
+        <div className="pt-pay-banner">
+          <span><strong>Add your bank details to get paid.</strong> You can accept jobs once they’re added.</span>
+          <button type="button" className="pt-btn is-small" onClick={() => setTab('payouts')}>Add bank details</button>
+        </div>
+      ) : null}
       {tab === 'jobs' ? (
         <div className="pt-stack">
           {current ? <Notice>You have a delivery in progress. Finish it before taking another.</Notice> : null}

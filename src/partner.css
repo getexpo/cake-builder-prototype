@@ -148,3 +148,4 @@ textarea.pt-input { min-height: 72px; resize: vertical; }
 .pt-who { display: flex; align-items: center; gap: 8px; min-width: 0; }
 .pt-who-email { font-size: 13px; color: var(--muted); max-width: 220px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 @media (max-width: 520px) { .pt-who-email { max-width: 120px; } }
+.pt-pay-banner { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; padding: 14px 16px; border-radius: 14px; background: #FEF3C7; border: 1px solid #FCD34D; color: #78350F; }
