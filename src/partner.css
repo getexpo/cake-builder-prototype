@@ -180,3 +180,10 @@ textarea.pt-input { min-height: 72px; resize: vertical; }
 .pt-acct-add { border-top: 1px solid var(--line); border-radius: 0 0 12px 12px; margin-top: 4px; padding-top: 12px; }
 .pt-acct-add .pt-acct-num { background: #BE185D; color: #FFFFFF; }
 .pt-acct-text span { font-weight: 500; }
+.pt-team-form { align-items: flex-end; flex-wrap: wrap; gap: 12px; }
+.pt-team-form .pt-field { flex: 1 1 260px; }
+.pt-team-actions { display: flex; gap: 6px; flex-wrap: wrap; justify-content: flex-end; }
+.pt-acct-status.is-team { background: #E0E7FF; color: #3730A3; }
+.pt-invite { max-width: 520px; margin: 0 auto; }
+.pt-eyebrow { margin: 0; font-size: 13px; font-weight: 700; letter-spacing: .06em; text-transform: uppercase; color: #9D174D; }
+.pt-btn.is-danger { background: #B91C1C; border-color: #B91C1C; color: #FFFFFF; }

@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { CATEGORIES, SHOPS } from './catalog.js'
 import { friendlyError, supabase, uploadDocument } from './supabaseClient.js'
-import { Badge, Check, Field, FileField, LocationsEditor, Loading, Notice, Shell, SignInScreen, WorkEligibility, eligibilityDocs, eligibilityMissing, locationsProblem, money, useAccountGate, useSession, when } from './partnerShared.jsx'
+import { Badge, Check, Field, FileField, LocationsEditor, Loading, Notice, Shell, SignInScreen, WorkEligibility, signInWithGoogle, signOut, eligibilityDocs, eligibilityMissing, locationsProblem, money, useAccountGate, useSession, when } from './partnerShared.jsx'
 import { newLocation, shopLocations, withCoordinates } from './geo.js'
 import { DEFAULT_TIMES, NOTICE_OPTIONS, WEEKDAYS, dateLabel, vanDate, weekday } from './schedule.js'
 import { LIBRARY, cakeOptions } from './builderLibrary.js'
@@ -22,13 +22,43 @@ export function templateFor(category) {
   return { builder: JSON.parse(JSON.stringify(sample.builder)), icon: sample.icon, tint: sample.tint }
 }
 
+const INVITE_KEY = 'bakery-invite'
+const INVITE_NAME_KEY = 'bakery-invite-name'
+const store = {
+  get: (key) => { try { return window.localStorage.getItem(key) } catch { return null } },
+  set: (key, value) => { try { window.localStorage.setItem(key, value) } catch { /* private mode */ } },
+  remove: (key) => { try { window.localStorage.removeItem(key) } catch { /* private mode */ } },
+}
+// An invite link looks like /bakery?invite=<token>. Keep the token through the Google sign-in round trip.
+function readInvite() {
+  try {
+    const params = new URLSearchParams(window.location.search)
+    const token = params.get('invite')
+    if (token && /^[0-9a-f-]{36}$/i.test(token)) {
+      store.set(INVITE_KEY, token)
+      params.delete('invite')
+      const rest = params.toString()
+      window.history.replaceState(null, '', `${window.location.pathname}${rest ? `?${rest}` : ''}${window.location.hash}`)
+    }
+  } catch { /* ignore */ }
+  return store.get(INVITE_KEY)
+}
+function clearInvite() { store.remove(INVITE_KEY); store.remove(INVITE_NAME_KEY) }
+
 export default function BakeryApp() {
   const { loading, session } = useSession()
+  const [invite, setInvite] = useState(readInvite)
   const gate = useAccountGate(session, async (user) => {
-    const { data } = await supabase.from('bakery_applications').select('id').eq('user_id', user.id).limit(1)
-    return Boolean(data?.length)
-  }, (email) => `There’s no bakery account for ${email} yet. Tap “Create a bakery account” to apply.`)
+    const [apps, teams] = await Promise.all([
+      supabase.from('bakery_applications').select('id').eq('user_id', user.id).limit(1),
+      supabase.from('bakery_members').select('id').eq('user_id', user.id).eq('status', 'active').limit(1),
+    ])
+    return Boolean(apps.data?.length || teams.data?.length)
+  }, (email) => `There’s no bakery account for ${email} yet. Tap “Create a bakery account” to apply, or ask your bakery’s owner for an invite.`)
   if (loading || gate.checking) return <Loading title={TITLE} />
+  const dropInvite = () => { clearInvite(); setInvite(null) }
+  if (invite && !session) return <InviteScreen token={invite} onCancel={dropInvite} />
+  if (invite && session) return <InviteAccept token={invite} user={session.user} onDone={dropInvite} />
   if (!session) {
     return (
       <SignInScreen
@@ -53,17 +83,22 @@ const SELECTED_KEY = 'bakery-selected'
 function BakeryHome({ user }) {
   const [applications, setApplications] = useState(undefined)
   const [bakeries, setBakeries] = useState([])
+  const [memberShops, setMemberShops] = useState([])
   const [selectedId, setSelectedId] = useState(() => { try { return localStorage.getItem(SELECTED_KEY) || '' } catch { return '' } })
   const [editing, setEditing] = useState(false)
   const [adding, setAdding] = useState(false)
   const [error, setError] = useState('')
 
   const load = useCallback(async () => {
-    const [appRes, shopRes] = await Promise.all([
+    const [appRes, shopRes, teamRes] = await Promise.all([
       supabase.from('bakery_applications').select('*').eq('user_id', user.id).order('created_at', { ascending: true }),
       supabase.from('bakeries').select('*').eq('owner_id', user.id),
+      supabase.from('bakery_members').select('bakery_id').eq('user_id', user.id).eq('status', 'active'),
     ])
     if (appRes.error) setError(friendlyError(appRes.error))
+    const teamIds = (teamRes.data || []).map((row) => row.bakery_id)
+    const teamShops = teamIds.length ? (await supabase.from('bakeries').select('*').in('id', teamIds)).data || [] : []
+    setMemberShops(teamShops)
     setApplications(appRes.data || [])
     setBakeries(shopRes.data || [])
     return appRes.data || []
@@ -75,7 +110,9 @@ function BakeryHome({ user }) {
   }, [])
 
   useEffect(() => { load() }, [load])
-  const application = applications?.find((item) => item.id === selectedId) || applications?.[0] || null
+  const memberPick = selectedId.startsWith('m:') ? memberShops.find((shop) => `m:${shop.id}` === selectedId) : null
+  const application = memberPick ? null : applications?.find((item) => item.id === selectedId) || applications?.[0] || null
+  const memberShop = memberPick || (!applications?.length && memberShops.length ? memberShops[0] : null)
   const bakery = application ? bakeries.find((shop) => shop.application_id === application.id) || (bakeries.length === 1 && applications.length === 1 && !bakeries[0].application_id ? bakeries[0] : null) : null
   // While an application is being reviewed, check every 20 seconds so approval shows up on its own.
   const waiting = application && (application.status === 'pending' || (application.status === 'approved' && !bakery))
@@ -87,17 +124,27 @@ function BakeryHome({ user }) {
 
   if (applications === undefined) return <Loading title={TITLE} />
 
-  const switcher = applications.length ? (
+  const accountItems = [
+    ...applications.map((item) => {
+      const shop = bakeries.find((b) => b.application_id === item.id)
+      return { id: item.id, name: item.business_name, where: [shop?.address || item.address, shop?.area || item.city].filter(Boolean).join(', '), badge: item.status === 'approved' ? '' : item.status === 'pending' ? 'In review' : item.status }
+    }),
+    ...memberShops.map((shop) => ({ id: `m:${shop.id}`, name: shop.name, where: [shop.address, shop.area].filter(Boolean).join(', '), badge: 'Team' })),
+  ]
+  const currentName = memberShop ? memberShop.name : application?.business_name
+  const switcher = accountItems.length ? (
     <AccountMenu
-      applications={applications}
-      bakeries={bakeries}
-      currentId={adding ? '' : application?.id}
-      currentLabel={adding ? 'New bakery' : application?.business_name}
+      items={accountItems}
+      currentId={adding ? '' : memberShop ? `m:${memberShop.id}` : application?.id}
+      currentLabel={adding ? 'New bakery' : currentName}
       onChoose={choose}
       onAdd={() => { setAdding(true); setEditing(false) }}
     />
   ) : null
 
+  if (memberShop && !adding) {
+    return <BakeryDashboard key={`m:${memberShop.id}`} role="member" user={user} bakery={memberShop} application={null} onSaved={load} headerExtra={switcher} />
+  }
   if (!application || editing || adding) {
     const first = applications[0]
     const prefill = adding && first ? {
@@ -108,7 +155,7 @@ function BakeryHome({ user }) {
     return (
       <Shell title={adding ? 'Add a bakery' : TITLE} user={user} headerExtra={switcher}>
         {error ? <Notice kind="error">{error}</Notice> : null}
-        {adding ? <button type="button" className="pt-link-btn" onClick={() => setAdding(false)}>← Back to {application?.business_name}</button> : null}
+        {adding && currentName ? <button type="button" className="pt-link-btn" onClick={() => setAdding(false)}>← Back to {currentName}</button> : null}
         <BakeryForm
           key={adding ? 'new' : application?.id || 'first'}
           user={user}
@@ -147,7 +194,7 @@ function BakeryHome({ user }) {
   return <BakeryDashboard key={bakery.id} user={user} bakery={bakery} application={application} onSaved={load} headerExtra={switcher} />
 }
 
-function AccountMenu({ applications, bakeries, currentId, currentLabel, onChoose, onAdd }) {
+function AccountMenu({ items, currentId, currentLabel, onChoose, onAdd }) {
   const [open, setOpen] = useState(false)
   const ref = useRef(null)
   useEffect(() => {
@@ -165,14 +212,12 @@ function AccountMenu({ applications, bakeries, currentId, currentLabel, onChoose
       {open ? (
         <div className="pt-acct-menu" role="menu">
           <p className="pt-acct-head">Your bakeries</p>
-          {applications.map((item, index) => {
-            const shop = bakeries.find((b) => b.application_id === item.id)
-            const where = [shop?.address || item.address, shop?.area || item.city].filter(Boolean).join(', ')
+          {items.map((item, index) => {
             return (
               <button key={item.id} type="button" role="menuitem" className={`pt-acct-item ${item.id === currentId ? 'is-current' : ''}`} onClick={() => { setOpen(false); onChoose(item.id) }}>
                 <span className="pt-acct-num">{index + 1}</span>
-                <span className="pt-acct-text"><strong>{item.business_name}</strong><span>{where}</span></span>
-                {item.status !== 'approved' ? <span className="pt-acct-status">{item.status === 'pending' ? 'In review' : item.status}</span> : null}
+                <span className="pt-acct-text"><strong>{item.name}</strong><span>{item.where}</span></span>
+                {item.badge ? <span className={`pt-acct-status ${item.badge === 'Team' ? 'is-team' : ''}`}>{item.badge}</span> : null}
                 {item.id === currentId ? <span className="pt-acct-check" aria-label="Current">✓</span> : null}
               </button>
             )
@@ -183,6 +228,184 @@ function AccountMenu({ applications, bakeries, currentId, currentLabel, onChoose
         </div>
       ) : null}
     </div>
+  )
+}
+
+/* ---------- Team: the owner invites people by email ---------- */
+
+function TeamTab({ bakery, user }) {
+  const [members, setMembers] = useState(null)
+  const [email, setEmail] = useState('')
+  const [busy, setBusy] = useState('')
+  const [error, setError] = useState('')
+  const [sent, setSent] = useState(null)
+  const [copied, setCopied] = useState('')
+  const [confirmId, setConfirmId] = useState('')
+  const linkFor = (token) => `${window.location.origin}/bakery?invite=${token}`
+
+  const load = useCallback(async () => {
+    const { data, error: err } = await supabase.from('bakery_members').select('id, email, full_name, status, token, invited_at, accepted_at').eq('bakery_id', bakery.id).neq('status', 'removed').order('created_at', { ascending: true })
+    if (err) setError(friendlyError(err))
+    setMembers((data || []).filter((row) => row.status !== 'removed'))
+  }, [bakery.id])
+  useEffect(() => { load() }, [load])
+
+  async function invite(address) {
+    setBusy(address); setError(''); setSent(null)
+    const { data, error: err } = await supabase.rpc('invite_bakery_member', { p_bakery: bakery.id, p_email: address })
+    if (err) setError(friendlyError(err))
+    else { setSent(data); setEmail('') }
+    await load()
+    setBusy('')
+  }
+  async function remove(member) {
+    setBusy(member.id); setError('')
+    const { error: err } = await supabase.rpc('remove_bakery_member', { p_id: member.id })
+    if (err) setError(friendlyError(err))
+    setConfirmId('')
+    await load()
+    setBusy('')
+  }
+  async function copy(id, token) {
+    try { await navigator.clipboard.writeText(linkFor(token)); setCopied(id); setTimeout(() => setCopied(''), 2500) } catch { setError('Couldn’t copy. Press and hold the link to copy it.') }
+  }
+  const emailError = email && !/^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/.test(email.trim()) ? 'Enter a valid email address.' : ''
+
+  return (
+    <div className="pt-stack">
+      <section className="pt-card pt-stack">
+        <h2 className="pt-h2">Add someone to {bakery.name}</h2>
+        <p className="pt-muted">They can manage orders, the calendar, messages, the menu and shop settings. Only you see Payouts and this Team page.</p>
+        <form className="pt-row pt-team-form" onSubmit={(event) => { event.preventDefault(); if (!emailError && email.trim()) invite(email.trim()) }} noValidate>
+          <Field label="Their email address" required error={emailError} hint="We email them a link to join with their full name and their Google account.">
+            <input className="pt-input" type="email" autoComplete="off" value={email} onChange={(e) => setEmail(e.target.value)} placeholder="name@example.com" />
+          </Field>
+          <button type="submit" className="pt-btn" disabled={!email.trim() || Boolean(emailError) || Boolean(busy)}>{busy && busy === email.trim() ? 'Sending…' : 'Send invite'}</button>
+        </form>
+        {sent ? (
+          <Notice kind="ok">
+            Invite sent to <strong>{sent.email}</strong>. You can also text them the link:{' '}
+            <button type="button" className="pt-link-btn" onClick={() => copy('sent', sent.token)}>{copied === 'sent' ? 'Link copied' : 'Copy invite link'}</button>
+          </Notice>
+        ) : null}
+        {error ? <Notice kind="error">{error}</Notice> : null}
+      </section>
+      <section className="pt-card pt-stack">
+        <h2 className="pt-h2">Team</h2>
+        <ul className="pt-doc-list">
+          <li className="is-done">
+            <span className="pt-doc-mark" aria-hidden="true">★</span>
+            <span className="pt-doc-text"><strong>You</strong><span className="pt-muted pt-small">{user.email} · Owner</span></span>
+          </li>
+          {members === null ? <li><span className="pt-muted">Loading…</span></li> : null}
+          {(members || []).map((member) => (
+            <li key={member.id} className="is-done">
+              <span className="pt-doc-mark" aria-hidden="true">{member.status === 'active' ? '✓' : '…'}</span>
+              <span className="pt-doc-text">
+                <strong>{member.full_name || member.email}</strong>
+                <span className="pt-muted pt-small">{member.full_name ? `${member.email} · ` : ''}{member.status === 'active' ? `Joined ${when(member.accepted_at)}` : `Invite sent ${when(member.invited_at)} · not joined yet`}</span>
+              </span>
+              <span className="pt-team-actions">
+                {member.status === 'invited' ? <button type="button" className="pt-btn is-ghost is-small" onClick={() => copy(member.id, member.token)}>{copied === member.id ? 'Copied' : 'Copy link'}</button> : null}
+                {member.status === 'invited' ? <button type="button" className="pt-btn is-ghost is-small" disabled={Boolean(busy)} onClick={() => invite(member.email)}>Resend</button> : null}
+                {confirmId === member.id
+                  ? <button type="button" className="pt-btn is-small is-danger" disabled={Boolean(busy)} onClick={() => remove(member)}>Confirm remove</button>
+                  : <button type="button" className="pt-btn is-ghost is-small" onClick={() => setConfirmId(member.id)}>Remove</button>}
+              </span>
+            </li>
+          ))}
+        </ul>
+        {members && !members.length ? <p className="pt-muted pt-small">No one else yet. Invite your staff above.</p> : null}
+      </section>
+    </div>
+  )
+}
+
+/* ---------- Joining a bakery from an invite link ---------- */
+
+function InviteScreen({ token, onCancel }) {
+  const [info, setInfo] = useState(undefined)
+  const [name, setName] = useState(store.get(INVITE_NAME_KEY) || '')
+  const [busy, setBusy] = useState(false)
+  const [error, setError] = useState('')
+  useEffect(() => {
+    supabase.rpc('get_bakery_invite', { p_token: token }).then(({ data }) => setInfo(data || null))
+  }, [token])
+  const nameOk = name.trim().length >= 2 && /\s/.test(name.trim())
+  async function go() {
+    if (!nameOk) { setError('Enter your full name (first and last).'); return }
+    store.set(INVITE_NAME_KEY, name.trim())
+    setBusy(true); setError('')
+    const { error: err } = await signInWithGoogle('/bakery', 'invite')
+    if (err) { setError(err.message); setBusy(false) }
+  }
+  if (info === undefined) return <Loading title={TITLE} />
+  if (!info || info.status !== 'invited') {
+    return (
+      <Shell title={TITLE}>
+        <section className="pt-card pt-stack">
+          <h1 className="pt-h1">{info?.status === 'active' ? 'This invite has been used' : 'This invite link isn’t valid'}</h1>
+          <p className="pt-muted">{info?.status === 'active' ? 'If it was you, log in to the bakery portal with the same Google account.' : 'It may have been cancelled. Ask the bakery owner to send you a new one.'}</p>
+          <button type="button" className="pt-btn" onClick={onCancel}>Go to bakery sign in</button>
+        </section>
+      </Shell>
+    )
+  }
+  return (
+    <Shell title={TITLE}>
+      <section className="pt-card pt-stack pt-invite">
+        <p className="pt-eyebrow">Team invite</p>
+        <h1 className="pt-h1">Join {info.bakery_name}</h1>
+        <p>You’ve been invited to help run <strong>{info.bakery_name}</strong> on the bakery portal: orders, calendar, messages and menu.</p>
+        <Field label="Your full name" required error={error && !nameOk ? error : ''}>
+          <input className="pt-input" autoComplete="name" value={name} onChange={(e) => setName(e.target.value)} placeholder="First and last name" />
+        </Field>
+        <Field label="Email" required hint="Sign in with the Google account for this email. The invite only works for it.">
+          <input className="pt-input" type="email" value={info.email} readOnly aria-readonly="true" />
+        </Field>
+        {error && nameOk ? <Notice kind="error">{error}</Notice> : null}
+        <button type="button" className="pt-btn is-large" disabled={busy || !nameOk} onClick={go}>{busy ? 'Opening Google…' : 'Continue with Google'}</button>
+        <button type="button" className="pt-link-btn" onClick={onCancel}>Not you? Go to the normal sign in</button>
+      </section>
+    </Shell>
+  )
+}
+
+function InviteAccept({ token, user, onDone }) {
+  const [name, setName] = useState(store.get(INVITE_NAME_KEY) || user.user_metadata?.full_name || '')
+  const [needName, setNeedName] = useState(!store.get(INVITE_NAME_KEY))
+  const [error, setError] = useState('')
+  const [busy, setBusy] = useState(!needName)
+  const accept = useCallback(async (fullName) => {
+    setBusy(true); setError('')
+    const { data, error: err } = await supabase.rpc('accept_bakery_invite', { p_token: token, p_full_name: fullName })
+    if (err) { setError(friendlyError(err)); setBusy(false); return }
+    if (data) store.set(SELECTED_KEY, `m:${data}`)
+    onDone()
+  }, [token, onDone])
+  useEffect(() => { if (!needName) accept(store.get(INVITE_NAME_KEY)) }, []) // eslint-disable-line react-hooks/exhaustive-deps
+  if (busy && !error) return <Loading title={TITLE} />
+  return (
+    <Shell title={TITLE} user={user}>
+      <section className="pt-card pt-stack pt-invite">
+        <h1 className="pt-h1">Join the bakery team</h1>
+        {needName ? (
+          <>
+            <Field label="Your full name" required>
+              <input className="pt-input" autoComplete="name" value={name} onChange={(e) => setName(e.target.value)} />
+            </Field>
+            <button type="button" className="pt-btn" disabled={busy || name.trim().length < 2} onClick={() => { setNeedName(false); accept(name.trim()) }}>Join</button>
+          </>
+        ) : null}
+        {error ? <Notice kind="error">{error}</Notice> : null}
+        {error ? (
+          <div className="pt-row">
+            <button type="button" className="pt-btn" onClick={() => signOut()}>Sign out and use another account</button>
+            <button type="button" className="pt-btn is-ghost" onClick={onDone}>Skip this invite</button>
+          </div>
+        ) : null}
+      </section>
+    </Shell>
   )
 }
 
@@ -292,8 +515,9 @@ function BakeryForm({ user, existing, prefill, onDone }) {
   )
 }
 
-function BakeryDashboard({ user, bakery, application, onSaved, headerExtra }) {
-  const [tab, setTab] = useState(bakery.active ? 'orders' : 'setup')
+function BakeryDashboard({ user, bakery, application, onSaved, headerExtra, role = 'owner' }) {
+  const isOwner = role === 'owner'
+  const [tab, setTab] = useState(bakery.active || !isOwner ? 'orders' : 'setup')
   const [orders, setOrders] = useState([])
   const [error, setError] = useState('')
   const [busyId, setBusyId] = useState('')
@@ -329,7 +553,7 @@ function BakeryDashboard({ user, bakery, application, onSaved, headerExtra }) {
   const unread = conversations.reduce((sum, item) => sum + (item.bakery_unread || 0), 0)
   const [payout, reloadPayout] = usePayoutSummary(user.id)
   const optionsDone = Boolean((bakery.builder && Object.keys(bakery.builder).length) || (bakery.menu || []).length)
-  const setupLeft = [!optionsDone, !payout?.bank_last4, !bakery.active].filter(Boolean).length
+  const setupLeft = isOwner ? [!optionsDone, !payout?.bank_last4, !bakery.active].filter(Boolean).length : 0
   const tabs = [
     ...(setupLeft ? [{ id: 'setup', label: 'Get started', count: setupLeft }] : []),
     { id: 'orders', label: 'Orders', count: newCount },
@@ -337,18 +561,19 @@ function BakeryDashboard({ user, bakery, application, onSaved, headerExtra }) {
     { id: 'messages', label: 'Messages', count: unread },
     { id: 'menu', label: 'Menu' },
     { id: 'shop', label: 'Shop settings' },
-    { id: 'payouts', label: 'Payouts' },
+    ...(isOwner ? [{ id: 'payouts', label: 'Payouts' }, { id: 'team', label: 'Team' }] : []),
   ]
 
   return (
     <Shell title={bakery.name} user={user} tabs={tabs} tab={tab} onTab={setTab} wide headerExtra={headerExtra}>
-      {payout !== undefined && !payout?.bank_last4 && tab !== 'payouts' && tab !== 'setup' ? (
+      {isOwner && payout !== undefined && !payout?.bank_last4 && tab !== 'payouts' && tab !== 'setup' && tab !== 'team' ? (
         <div className="pt-pay-banner">
           <span><strong>Add your bank details to get paid.</strong> We send your earnings by direct deposit every week.</span>
           <button type="button" className="pt-btn is-small" onClick={() => setTab('payouts')}>Add bank details</button>
         </div>
       ) : null}
-      {!bakery.active && tab !== 'setup' ? <Notice>Your shop isn’t live yet. <button type="button" className="pt-link-btn" onClick={() => setTab('setup')}>See what’s left</button></Notice> : null}
+      {!bakery.active && tab !== 'setup' ? <Notice>{isOwner ? <>Your shop isn’t live yet. <button type="button" className="pt-link-btn" onClick={() => setTab('setup')}>See what’s left</button></> : 'This shop isn’t live yet. The owner can publish it.'}</Notice> : null}
+      {tab === 'team' && isOwner ? <TeamTab bakery={bakery} user={user} /> : null}
       {tab === 'setup' ? (
         <SetupChecklist
           approvedAt={application?.reviewed_at}
@@ -360,7 +585,7 @@ function BakeryDashboard({ user, bakery, application, onSaved, headerExtra }) {
           onFinished={() => setTab('orders')}
         />
       ) : null}
-      {tab === 'payouts' ? <PayoutSetup onSaved={reloadPayout} summary={payout} /> : null}
+      {tab === 'payouts' && isOwner ? <PayoutSetup onSaved={reloadPayout} summary={payout} /> : null}
       {error ? <Notice kind="error">{error}</Notice> : null}
       {tab === 'orders' ? (
         <div className="pt-stack">
