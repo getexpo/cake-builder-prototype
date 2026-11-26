@@ -21,7 +21,14 @@ function shiftMonth(first, delta) {
 }
 
 // cell(day) -> { disabled, note, tone: 'busy'|'off'|'full'|'', count }
-export function MonthCalendar({ value, onPick, cell, initial, minMonth, maxMonths = 6, compact }) {
+export function MonthCalendar({ value, onPick, cell, initial, minMonth, maxMonths = 6, compact, scrollOnOpen }) {
+  const boxRef = useRef(null)
+  // When opened from a button, bring the whole calendar into view (above any sticky bar).
+  useEffect(() => {
+    if (!scrollOnOpen || !boxRef.current) return
+    const id = requestAnimationFrame(() => boxRef.current?.scrollIntoView({ behavior: 'smooth', block: 'nearest' }))
+    return () => cancelAnimationFrame(id)
+  }, [scrollOnOpen])
   const today = vanDate()
   const firstAllowed = monthStart(minMonth || today)
   const [first, setFirst] = useState(() => monthStart(initial || value || today))
@@ -34,7 +41,7 @@ export function MonthCalendar({ value, onPick, cell, initial, minMonth, maxMonth
     days.push(day)
   }
   return (
-    <div className={`cx-cal ${compact ? 'is-compact' : ''}`}>
+    <div ref={boxRef} className={`cx-cal ${compact ? 'is-compact' : ''}`}>
       <div className="cx-cal-head">
         <button type="button" className="cx-cal-nav" aria-label="Previous month" disabled={first <= firstAllowed} onClick={() => setFirst(shiftMonth(first, -1))}>‹</button>
         <strong>{monthTitle(first)}</strong>

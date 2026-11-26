@@ -1,6 +1,6 @@
 /* Calendar + chat, shared by the customer, bakery and admin apps. Uses the host app's colour variables. */
 
-.cx-cal { background: #FFFFFF; border: 1px solid var(--line); border-radius: 16px; padding: 12px; }
+.cx-cal { scroll-margin-top: 80px; scroll-margin-bottom: 120px; background: #FFFFFF; border: 1px solid var(--line); border-radius: 16px; padding: 12px; }
 .cx-cal-head { display: flex; align-items: center; justify-content: space-between; margin-bottom: 8px; }
 .cx-cal-head strong { font-size: 15px; }
 .cx-cal-nav { width: 40px; height: 40px; border-radius: 12px; border: 1px solid var(--line); background: #FFFFFF; font-size: 22px; line-height: 1; }

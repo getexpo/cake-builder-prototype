@@ -1,3 +1,4 @@
+import { LIBRARY } from './builderLibrary.js'
 // Demo shop catalog for the customer app.
 // Shop names are invented examples; the mix of shop types mirrors what Vancouver has
 // (celebration cakes, wedding cakes, cupcakes, cheesecakes, ice cream cakes, donuts,
@@ -24,12 +25,14 @@ export const CATEGORIES = [
 
 const CAKE_SHAPES = ['round', 'heart', 'tall', 'premium']
 
-const CLASSIC_FLAVOURS = [
-  { id: 'vanilla', label: 'Vanilla', price: 0, swatch: '#F6E7C1' },
-  { id: 'chocolate', label: 'Chocolate', price: 4, swatch: '#5B3A29' },
-  { id: 'red-velvet', label: 'Red velvet', price: 6, swatch: '#9F1D2C' },
-  { id: 'marble', label: 'Marble', price: 5, swatch: 'marble' },
-]
+// The demo cake shops offer every flavour from the screenshots (the first 52 in the library).
+const CLASSIC_FLAVOURS = LIBRARY.flavours.slice(0, 52).map((item) => ({ ...item }))
+// ...and every filling from the screenshots (the first 34 in the library, starting with Baker's choice).
+const CLASSIC_FILLINGS = LIBRARY.fillings.slice(0, 34).map((item) => ({ ...item }))
+// ...and every frosting from the screenshots (the first 55 in the library).
+// ...and the 4"–12" round sizes with servings.
+const CLASSIC_SIZES = LIBRARY.sizes.slice(0, 9).map((item) => ({ ...item }))
+const CLASSIC_FROSTINGS = LIBRARY.frostings.slice(0, 55).map((item) => ({ ...item }))
 
 const box = (sizes) => sizes.map(([count, price]) => ({ id: String(count), label: `Box of ${count}`, price }))
 
@@ -46,7 +49,7 @@ export const SHOPS = [
     tint: '#F3E8E2',
     icon: 'cake',
     closedDays: [1], // closed Mondays
-    builder: { kind: 'cake', noun: 'cake', maxLayers: 6, shapes: ['round', 'heart', 'tall'], flavours: CLASSIC_FLAVOURS, leadHours: 72 },
+    builder: { kind: 'cake', noun: 'cake', maxLayers: 6, shapes: ['round', 'heart', 'tall'], flavours: CLASSIC_FLAVOURS, sizes: CLASSIC_SIZES, fillings: CLASSIC_FILLINGS, frostings: CLASSIC_FROSTINGS, leadHours: 72 },
     menu: [
       { id: 'mc-1', title: 'Vanilla Birthday Bloom', detail: '6" vanilla sponge, buttercream florals', price: 58 },
       { id: 'mc-2', title: 'Chocolate Celebration Stack', detail: 'Three layers of chocolate sponge with ganache', price: 72, leadHours: 48 },
@@ -62,7 +65,7 @@ export const SHOPS = [
     leadHours: 24,
     tint: '#F6EBDD',
     icon: 'cake',
-    builder: { kind: 'cake', noun: 'cake', maxLayers: 4, shapes: ['round', 'heart'], flavours: CLASSIC_FLAVOURS },
+    builder: { kind: 'cake', noun: 'cake', maxLayers: 4, shapes: ['round', 'heart'], flavours: CLASSIC_FLAVOURS, sizes: CLASSIC_SIZES, fillings: CLASSIC_FILLINGS, frostings: CLASSIC_FROSTINGS },
     menu: [
       { id: 'hc-1', title: 'Strawberry Shortcake', detail: 'Vanilla sponge, fresh strawberries, whipped cream', price: 54 },
       { id: 'hc-2', title: 'Cookies and Cream', detail: 'Chocolate sponge with cookie crumble buttercream', price: 62 },

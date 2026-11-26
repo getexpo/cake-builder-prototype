@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { CATEGORIES, SHOPS } from './catalog.js'
+import { cakeOptions } from './builderLibrary.js'
 import { friendlyError, supabase } from './supabaseClient.js'
 import { STATUS_HINT, addDays, dateLabel, dayStatus, earliestDay, leadFor, noticeLabel, timeLabel, timesOn, vanDate, vanMoment } from './schedule.js'
 import { ChatThread, ConversationList, MonthCalendar, useConversations } from './widgets.jsx'
@@ -12,38 +13,7 @@ import './customer.css'
 
 const SETTINGS_KEY = 'cake-settings'
 
-const SHAPES = [
-  { id: 'round', label: 'Round', price: 45 },
-  { id: 'heart', label: 'Heart', price: 55 },
-  { id: 'tall', label: 'Tall', price: 70 },
-  { id: 'premium', label: 'Premium tiered', price: 90 },
-]
-// Placeholder prices until each bakery sets its own.
-const SIZES = [
-  { id: '6', label: '6"', price: 0 },
-  { id: '8', label: '8"', price: 15 },
-  { id: '10', label: '10"', price: 30 },
-]
-const FLAVORS = [
-  { id: 'vanilla', label: 'Vanilla', price: 0, swatch: '#F6E7C1' },
-  { id: 'chocolate', label: 'Chocolate', price: 4, swatch: '#5B3A29' },
-  { id: 'red-velvet', label: 'Red velvet', price: 6, swatch: '#9F1D2C' },
-  { id: 'marble', label: 'Marble', price: 5, swatch: 'marble' },
-]
 const CHOCOLATES = ['Milk', 'Dark', 'White']
-const FILLINGS = ['Vanilla cream', 'Chocolate ganache', 'Strawberry jam', 'Cream cheese']
-const FROSTINGS = [
-  { id: 'buttercream', label: 'Buttercream', price: 0 },
-  { id: 'cream-cheese', label: 'Cream cheese', price: 5 },
-  { id: 'ganache', label: 'Ganache drip', price: 7 },
-]
-const TOPPINGS = [
-  { id: 'sprinkles', label: 'Sprinkles', price: 3 },
-  { id: 'shavings', label: 'Chocolate shavings', price: 4 },
-  { id: 'berries', label: 'Fresh berries', price: 6 },
-  { id: 'drizzle', label: 'Extra drizzle', price: 3 },
-]
-const PRICE_PER_LAYER = 8
 const DEFAULT_LAYERS = 3
 
 const PICKUP_STEPS = [
@@ -132,13 +102,16 @@ function layerLimitFor(shop) {
   return isCakeBuilder(shop) ? shop.builder.maxLayers : 0
 }
 
+function optsFor(shop) {
+  return cakeOptions(shop?.builder)
+}
+
 function shapesFor(shop) {
-  const allowed = shop?.builder?.shapes || ['round', 'heart']
-  return SHAPES.filter((shape) => allowed.includes(shape.id))
+  return optsFor(shop).shapes
 }
 
 function flavoursFor(shop) {
-  return shop?.builder?.flavours || FLAVORS
+  return optsFor(shop).flavours
 }
 
 function builderTitle(shop) {
@@ -156,29 +129,32 @@ function leadLabel(hours) {
 }
 
 function newBuild(shop) {
-  const flavours = flavoursFor(shop)
+  const opts = optsFor(shop)
+  const flavours = opts.flavours
   const layers = Math.min(DEFAULT_LAYERS, layerLimitFor(shop) || DEFAULT_LAYERS)
   return {
-    shape: shapesFor(shop)[0]?.id || 'round',
-    size: '6',
-    flavor: (flavours.find((item) => item.id === 'chocolate') || flavours[0]).id,
+    shape: opts.shapes[0]?.id || 'round',
+    size: (opts.sizes.find((item) => item.price === 0) || opts.sizes[0])?.id || '',
+    flavor: (flavours.find((item) => item.id === 'chocolate') || flavours[0])?.id || '',
     chocolate: 'Dark',
     layerCount: layers,
-    fillings: Array(layers).fill(FILLINGS[0]),
+    fillings: Array(layers).fill(opts.fillings[0]?.label || ''),
     sameFilling: true,
-    frosting: 'buttercream',
+    frosting: (opts.frostings.find((item) => item.price === 0) || opts.frostings[0])?.id || '',
     toppings: [],
     message: '',
   }
 }
 
 function buildPrice(build, shop) {
-  const shape = SHAPES.find((item) => item.id === build.shape)
-  const size = SIZES.find((item) => item.id === build.size)
-  const flavor = flavoursFor(shop).find((item) => item.id === build.flavor)
-  const frosting = FROSTINGS.find((item) => item.id === build.frosting)
-  const toppings = TOPPINGS.filter((item) => build.toppings.includes(item.id)).reduce((sum, item) => sum + item.price, 0)
-  return (shape?.price || 0) + (size?.price || 0) + (flavor?.price || 0) + build.layerCount * PRICE_PER_LAYER + (frosting?.price || 0) + toppings
+  const opts = optsFor(shop)
+  const shape = opts.shapes.find((item) => item.id === build.shape)
+  const size = opts.sizes.find((item) => item.id === build.size)
+  const flavor = opts.flavours.find((item) => item.id === build.flavor)
+  const frosting = opts.frostings.find((item) => item.id === build.frosting)
+  const toppings = opts.toppings.filter((item) => build.toppings.includes(item.id)).reduce((sum, item) => sum + Number(item.price || 0), 0)
+  const fillings = build.fillings.slice(0, build.layerCount).reduce((sum, label) => sum + Number(opts.fillings.find((item) => item.label === label)?.price || 0), 0)
+  return Math.max(0, Number(shape?.price || 0) + Number(size?.price || 0) + Number(flavor?.price || 0) + build.layerCount * opts.layerPrice + Number(frosting?.price || 0) + toppings + fillings)
 }
 
 function flavorName(build, shop) {
@@ -188,10 +164,11 @@ function flavorName(build, shop) {
 }
 
 function buildSummary(build, shop) {
-  const shape = SHAPES.find((item) => item.id === build.shape)?.label || ''
-  const size = SIZES.find((item) => item.id === build.size)?.label || ''
-  const frosting = FROSTINGS.find((item) => item.id === build.frosting)?.label.toLowerCase()
-  const toppings = TOPPINGS.filter((item) => build.toppings.includes(item.id)).map((item) => item.label.toLowerCase())
+  const opts = optsFor(shop)
+  const shape = opts.shapes.find((item) => item.id === build.shape)?.label || ''
+  const size = opts.sizes.find((item) => item.id === build.size)?.label || ''
+  const frosting = opts.frostings.find((item) => item.id === build.frosting)?.label.toLowerCase()
+  const toppings = opts.toppings.filter((item) => build.toppings.includes(item.id)).map((item) => item.label.toLowerCase())
   return [`${shape} ${size}`, `${build.layerCount} layers of ${flavorName(build, shop)}`, frosting, ...toppings].filter(Boolean).join(' · ')
 }
 
@@ -221,7 +198,11 @@ function customPrice(picks, shop) {
 
 function customFromPrice(shop) {
   const builder = shop?.builder || {}
-  if (isCakeBuilder(shop)) return shapesFor(shop)[0].price + Math.min(DEFAULT_LAYERS, builder.maxLayers) * PRICE_PER_LAYER
+  if (isCakeBuilder(shop)) {
+    const opts = optsFor(shop)
+    const cheapest = (list) => (list.length ? Math.min(...list.map((item) => Number(item.price) || 0)) : 0)
+    return Math.max(0, cheapest(opts.shapes) + cheapest(opts.sizes) + cheapest(opts.flavours) + cheapest(opts.frostings) + Math.min(DEFAULT_LAYERS, opts.maxLayers) * opts.layerPrice)
+  }
   return (builder.groups || []).reduce((sum, group) => {
     if (group.type === 'single' && group.required) return sum + Math.min(...group.options.map((option) => option.price))
     if (group.type === 'count') return sum + (group.min || 0) * (group.unitPrice || 0)
@@ -294,10 +275,13 @@ function ShapeIcon({ id }) {
     heart: <path d="M42 72C20 56 8 44 8 28a17 17 0 0 1 34-6 17 17 0 0 1 34 6c0 16-12 28-34 44z" />,
     tall: <rect x="24" y="8" width="36" height="68" rx="6" />,
     premium: <><rect x="28" y="8" width="28" height="20" rx="3" /><rect x="20" y="28" width="44" height="22" rx="3" /><rect x="12" y="50" width="60" height="26" rx="3" /></>,
+    square: <rect x="10" y="10" width="64" height="64" rx="6" />,
+    sheet: <rect x="6" y="20" width="72" height="44" rx="5" />,
+    number: <path d="M30 22l12-10v62M28 74h28" />,
   }
   return (
     <svg className="ca-shape" width="84" height="84" viewBox="0 0 84 84" fill="none" stroke="currentColor" strokeWidth="3" strokeLinejoin="round" aria-hidden="true">
-      {shapes[id]}
+      {shapes[id] || shapes.round}
     </svg>
   )
 }
@@ -411,6 +395,8 @@ export default function CustomerApp({ ctx }) {
   const [dateOpenFor, setDateOpenFor] = useState(null)
   const [dayLoad, setDayLoad] = useState({})
   const [needDate, setNeedDate] = useState('')
+  const [flavourQuery, setFlavourQuery] = useState('')
+  const [showAllFlavours, setShowAllFlavours] = useState(false)
   const [needOpen, setNeedOpen] = useState(false)
   const [chat, setChat] = useState(null)
   const [chatReturn, setChatReturn] = useState('home')
@@ -504,6 +490,8 @@ export default function CustomerApp({ ctx }) {
     setCustom(newCustom(shop))
     setNeedDate('')
     setNeedOpen(false)
+    setFlavourQuery('')
+    setShowAllFlavours(false)
     go('build')
   }
 
@@ -563,7 +551,6 @@ export default function CustomerApp({ ctx }) {
   }
 
   function renderBakeryCard(item) {
-    const first = shopEarliest(item)
     return (
       <button key={item.id} type="button" className="ca-store-card" onClick={() => openBakery(item.id)}>
         <Photo tint={item.tint} icon={item.icon} size={44} className="ca-store-photo" />
@@ -571,11 +558,7 @@ export default function CustomerApp({ ctx }) {
           <span className="ca-store-text">
             <span className="ca-store-name">{item.name}</span>
             <span className="ca-muted">{item.area} · {item.tagline}</span>
-            <span className="ca-chips">
-              <span className="ca-chip is-accent">{builderTitle(item)}</span>
-              {item.live ? <span className="ca-chip is-accent">New</span> : null}
-              <span className="ca-chip">{first ? `Earliest: ${dateLabel(first)}` : leadLabel(item.leadHours)}</span>
-            </span>
+            {item.live ? <span className="ca-chips"><span className="ca-chip is-accent">New</span></span> : null}
           </span>
         </span>
       </button>
@@ -634,6 +617,7 @@ export default function CustomerApp({ ctx }) {
           <>
             <MonthCalendar
               compact
+              scrollOnOpen
               value={value}
               initial={value}
               onPick={(day) => { setNeedDate(day); setNeedOpen(false) }}
@@ -721,7 +705,6 @@ export default function CustomerApp({ ctx }) {
 
   function renderBakery() {
     const items = bakery.menu
-    const first = shopEarliest(bakery)
     const limit = layerLimitFor(bakery)
     const builderLead = Number(bakery.builder?.leadHours) || 0
     return (
@@ -734,11 +717,6 @@ export default function CustomerApp({ ctx }) {
           <div className="ca-stack-4">
             <h1 className="ca-h1">{bakery.name}</h1>
             <span className="ca-muted">{bakery.tagline}</span>
-          </div>
-          <div className="ca-facts">
-            <div><strong>{bakery.area}</strong><span>Location</span></div>
-            <div><strong>{leadLabel(bakery.leadHours).replace('Order ', '')}</strong><span>Order ahead</span></div>
-            <div><strong>{first ? dateLabel(first) : 'Soon'}</strong><span>Earliest</span></div>
           </div>
           <button type="button" className="ca-btn ca-btn-ghost" onClick={() => openChat(bakery, 'bakery')}><Icon name="chat" size={18} />Message {bakery.name}</button>
         </div>
@@ -824,8 +802,19 @@ export default function CustomerApp({ ctx }) {
   function renderBuild() {
     if (!isCakeBuilder(bakery)) return renderCustomBuild()
     const limit = layerLimitFor(bakery)
-    const flavours = flavoursFor(bakery)
+    const opts = optsFor(bakery)
+    const flavours = opts.flavours
     const price = buildPrice(build, bakery)
+    const longList = flavours.length > 10
+    const query = flavourQuery.trim().toLowerCase()
+    let shownFlavours = flavours
+    if (longList && !showAllFlavours) {
+      shownFlavours = flavours.slice(0, 8)
+      const chosen = flavours.find((item) => item.id === build.flavor)
+      if (chosen && !shownFlavours.includes(chosen)) shownFlavours = [chosen, ...shownFlavours.slice(0, 7)]
+    } else if (query) {
+      shownFlavours = flavours.filter((item) => item.label.toLowerCase().includes(query))
+    }
     const shapes = shapesFor(bakery)
     const set = (patch) => setBuild((current) => ({ ...current, ...patch }))
     const atMax = build.layerCount >= limit
@@ -893,7 +882,7 @@ export default function CustomerApp({ ctx }) {
               {shapes.map((shape) => (
                 <button key={shape.id} type="button" aria-pressed={build.shape === shape.id} className={`ca-tile ${build.shape === shape.id ? 'is-selected' : ''}`} onClick={() => set({ shape: shape.id })}>
                   <ShapeIcon id={shape.id} />
-                  <span className="ca-tile-row"><strong>{shape.label}</strong><span>{money(shape.price)}</span></span>
+                  <span className="ca-tile-row"><strong>{shape.label}</strong><span>{money(Number(shape.price) || 0)}</span></span>
                 </button>
               ))}
             </div>
@@ -901,22 +890,26 @@ export default function CustomerApp({ ctx }) {
 
           <Section title="Size" note="Required">
             <div className="ca-grid-3">
-              {SIZES.map((size) => (
+              {opts.sizes.map((size) => (
                 <button key={size.id} type="button" aria-pressed={build.size === size.id} className={`ca-size ${build.size === size.id ? 'is-selected' : ''}`} onClick={() => set({ size: size.id })}>
-                  <strong>{size.label}</strong><span>{size.price ? `+${money(size.price)}` : 'Included'}</span>
+                  <strong>{size.label}</strong>{size.serves ? <small>Serves {size.serves}</small> : null}<span>{Number(size.price) > 0 ? `+${money(size.price)}` : Number(size.price) < 0 ? `−${money(-size.price)}` : 'Included'}</span>
                 </button>
               ))}
             </div>
           </Section>
 
-          <Section title="Cake flavour" note="Required">
+          <Section title="Cake flavour" note={longList ? `${flavours.length} flavours` : 'Required'}>
+            {longList && showAllFlavours ? (
+              <input className="ca-input ca-mb-10" type="search" aria-label="Search flavours" placeholder="Search flavours" value={flavourQuery} onChange={(event) => setFlavourQuery(event.target.value)} />
+            ) : null}
             <div className="ca-stack-10">
-              {flavours.map((flavor) => {
+              {!shownFlavours.length ? <p className="ca-muted">No flavours match “{flavourQuery}”.</p> : null}
+              {shownFlavours.map((flavor) => {
                 const selected = build.flavor === flavor.id
                 return (
                   <div key={flavor.id} className={`ca-flavor ${selected ? 'is-selected' : ''}`}>
                     <button type="button" aria-pressed={selected} className="ca-flavor-row" onClick={() => set({ flavor: flavor.id })}>
-                      <span className={`ca-swatch ${flavor.swatch === 'marble' ? 'is-marble' : ''}`} style={flavor.swatch === 'marble' ? undefined : { background: flavor.swatch }} aria-hidden="true" />
+                      <span className={`ca-swatch ${flavor.swatch === 'marble' ? 'is-marble' : flavor.swatch === 'rainbow' ? 'is-rainbow' : ''}`} style={flavor.swatch === 'marble' || flavor.swatch === 'rainbow' ? undefined : { background: flavor.swatch || '#EADFD3' }} aria-hidden="true" />
                       <strong>{flavor.label}</strong>
                       <span className="ca-muted">{flavor.price ? `+${money(flavor.price)}` : 'Included'}</span>
                     </button>
@@ -934,13 +927,18 @@ export default function CustomerApp({ ctx }) {
                 )
               })}
             </div>
+            {longList ? (
+              <button type="button" className="ca-btn ca-btn-ghost ca-mt-12" onClick={() => { setShowAllFlavours(!showAllFlavours); setFlavourQuery('') }}>
+                {showAllFlavours ? 'Show fewer flavours' : `Show all ${flavours.length} flavours`}
+              </button>
+            ) : null}
           </Section>
 
           <Section title="Layers" note={`Up to ${limit} at this bakery`}>
             <div className="ca-layer-controls is-boxed">
               <div className="ca-stack-2">
                 <strong>{build.layerCount} layers</strong>
-                <span className={atMax ? 'ca-warn ca-small' : 'ca-muted ca-small'}>{atMax ? 'That’s the most this bakery can make' : `+${money(PRICE_PER_LAYER)} per layer`}</span>
+                <span className={atMax ? 'ca-warn ca-small' : 'ca-muted ca-small'}>{atMax ? 'That’s the most this bakery can make' : (opts.layerPrice ? `+${money(opts.layerPrice)} per layer` : 'Extra layers included')}</span>
               </div>
               <div className="ca-stepper">
                 <button type="button" aria-label="Remove a layer" disabled={build.layerCount <= 1} onClick={() => setLayers(build.layerCount - 1)}>−</button>
@@ -949,7 +947,7 @@ export default function CustomerApp({ ctx }) {
             </div>
           </Section>
 
-          <Section title="Filling between layers">
+          {opts.fillings.length ? <Section title="Filling between layers">
             <label className="ca-check-label ca-mb-10">
               <input type="checkbox" checked={build.sameFilling} onChange={(event) => set({ sameFilling: event.target.checked, fillings: event.target.checked ? build.fillings.map(() => build.fillings[0]) : build.fillings })} />
               Same filling in every layer
@@ -967,35 +965,40 @@ export default function CustomerApp({ ctx }) {
                       fillings: current.sameFilling ? current.fillings.map(() => event.target.value) : current.fillings.map((value, i) => (i === index ? event.target.value : value)),
                     }))}
                   >
-                    {FILLINGS.map((option) => <option key={option} value={option}>{option}</option>)}
+                    {opts.fillings.map((option) => <option key={option.id} value={option.label}>{option.label}{Number(option.price) ? ` (+${money(option.price)} per layer)` : ''}</option>)}
                   </select>
                 </li>
               ))}
             </ul>
-          </Section>
+          </Section> : null}
 
-          <Section title="Outside frosting" note="Required">
+          {opts.frostings.length > 9 ? <Section title="Outside frosting" note={`${opts.frostings.length} options`}>
+            <select aria-label="Outside frosting" className="ca-select" value={build.frosting} onChange={(event) => set({ frosting: event.target.value })}>
+              {opts.frostings.map((frosting) => <option key={frosting.id} value={frosting.id}>{frosting.label}{Number(frosting.price) ? ` (+${money(frosting.price)})` : ''}</option>)}
+            </select>
+          </Section> : null}
+          {opts.frostings.length && opts.frostings.length <= 9 ? <Section title="Outside frosting" note="Required">
             <div className="ca-grid-3">
-              {FROSTINGS.map((frosting) => (
+              {opts.frostings.map((frosting) => (
                 <button key={frosting.id} type="button" aria-pressed={build.frosting === frosting.id} className={`ca-size ${build.frosting === frosting.id ? 'is-selected' : ''}`} onClick={() => set({ frosting: frosting.id })}>
-                  <strong className="ca-small-strong">{frosting.label}</strong><span>{frosting.price ? `+${money(frosting.price)}` : 'Included'}</span>
+                  <strong className="ca-small-strong">{frosting.label}</strong><span>{Number(frosting.price) ? `+${money(frosting.price)}` : 'Included'}</span>
                 </button>
               ))}
             </div>
-          </Section>
+          </Section> : null}
 
-          <Section title="Toppings" note="Optional">
+          {opts.toppings.length ? <Section title="Toppings" note="Optional">
             <div className="ca-wrap">
-              {TOPPINGS.map((topping) => {
+              {opts.toppings.map((topping) => {
                 const on = build.toppings.includes(topping.id)
                 return (
                   <button key={topping.id} type="button" aria-pressed={on} className={`ca-pill ${on ? 'is-dark' : ''}`} onClick={() => set({ toppings: on ? build.toppings.filter((id) => id !== topping.id) : [...build.toppings, topping.id] })}>
-                    {topping.label} · +{money(topping.price)}
+                    {topping.label}{Number(topping.price) ? ` · +${money(topping.price)}` : ''}
                   </button>
                 )
               })}
             </div>
-          </Section>
+          </Section> : null}
 
           <Section title="Message on top" note="Optional">
             <input id="ca-build-msg" aria-label="Message on top" className="ca-input" maxLength={40} placeholder="e.g. Happy 30th, Maya!" value={build.message} onChange={(event) => set({ message: event.target.value })} />
@@ -1298,6 +1301,7 @@ export default function CustomerApp({ ctx }) {
                     <div className="ca-stack-4">
                       <MonthCalendar
                         compact
+                        scrollOnOpen
                         value={item.date}
                         initial={item.date}
                         onPick={(day) => setItemDate(item.id, day)}

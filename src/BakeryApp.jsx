@@ -3,6 +3,7 @@ import { CATEGORIES, SHOPS } from './catalog.js'
 import { friendlyError, supabase, uploadDocument } from './supabaseClient.js'
 import { BC_AREAS, Badge, Check, Field, FileField, Loading, Notice, Shell, SignInScreen, money, useSession, when } from './partnerShared.jsx'
 import { DEFAULT_TIMES, NOTICE_OPTIONS, WEEKDAYS, dateLabel, timeLabel, vanDate, weekday } from './schedule.js'
+import { LIBRARY, cakeOptions } from './builderLibrary.js'
 import { ChatThread, ConversationList, MonthCalendar, useConversations } from './widgets.jsx'
 
 const TITLE = 'Sell your cakes'
@@ -265,7 +266,7 @@ function BakeryDashboard({ user, bakery, onSaved }) {
 
 function MenuEditor({ bakery, onSaved }) {
   const hasBuilder = bakery.builder && Object.keys(bakery.builder).length
-  const [builder, setBuilder] = useState(() => (hasBuilder ? bakery.builder : templateFor(bakery.category).builder))
+  const [builder, setBuilder] = useState(() => withOptions(hasBuilder ? bakery.builder : templateFor(bakery.category).builder))
   const [items, setItems] = useState(() => (bakery.menu || []).map((item) => ({ ...item })))
   const [busy, setBusy] = useState(false)
   const [message, setMessage] = useState('')
@@ -276,7 +277,9 @@ function MenuEditor({ bakery, onSaved }) {
   async function save() {
     setBusy(true); setMessage(''); setError('')
     const clean = items.filter((item) => item.title.trim()).map((item, index) => ({ id: item.id || `${bakery.id}-m${Date.now()}-${index}`, title: item.title.trim(), detail: (item.detail || '').trim(), price: Math.max(0, Number(item.price) || 0), leadHours: Number(item.leadHours) || 0 }))
-    const { error: err } = await supabase.from('bakeries').update({ builder, menu: clean }).eq('id', bakery.id)
+    const problem = builderProblem(builder)
+    if (problem) { setBusy(false); setError(problem); return }
+    const { error: err } = await supabase.from('bakeries').update({ builder: cleanBuilder(builder), menu: clean }).eq('id', bakery.id)
     setBusy(false)
     if (err) setError(friendlyError(err))
     else { setMessage('Menu saved.'); setItems(clean); onSaved() }
@@ -288,7 +291,7 @@ function MenuEditor({ bakery, onSaved }) {
         <h2 className="pt-h2">Build-your-own item</h2>
         <p className="pt-muted">Customers see “Build your own {builder.noun || 'cake'}” at the top of your menu.</p>
         <Field label="Start from a template" required>
-          <select className="pt-input" defaultValue="" onChange={(e) => { if (e.target.value) setBuilder(templateFor(e.target.value).builder) }}>
+          <select className="pt-input" defaultValue="" onChange={(e) => { if (e.target.value) setBuilder(withOptions(templateFor(e.target.value).builder)) }}>
             <option value="">Keep current options</option>
             {SHOP_TYPES.map((item) => <option key={item.id} value={item.id}>{item.label}</option>)}
           </select>
@@ -298,13 +301,31 @@ function MenuEditor({ bakery, onSaved }) {
           <NoticeSelect value={builder.leadHours || 0} onChange={(hours) => setBuilder((current) => ({ ...current, leadHours: hours }))} />
         </Field>
         {builder.kind === 'cake' ? (
-          <Field label="Most layers you can make" required>
-            <input className="pt-input" type="number" min={1} max={12} value={builder.maxLayers || 4} onChange={(e) => setBuilder((current) => ({ ...current, maxLayers: Math.min(12, Math.max(1, Number(e.target.value) || 1)) }))} />
-          </Field>
+          <div className="pt-grid-2">
+            <Field label="Most layers you can make" required>
+              <input className="pt-input" type="number" min={1} max={12} value={builder.maxLayers || 4} onChange={(e) => setBuilder((current) => ({ ...current, maxLayers: Math.min(12, Math.max(1, Number(e.target.value) || 1)) }))} />
+            </Field>
+            <Field label="Price per layer ($)" hint="0 if layers are included">
+              <input className="pt-input" inputMode="decimal" value={builder.layerPrice ?? ''} onChange={(e) => setBuilder((current) => ({ ...current, layerPrice: e.target.value.replace(/[^\d.]/g, '') }))} />
+            </Field>
+          </div>
         ) : (
-          <p className="pt-small">Options: {(builder.groups || []).map((group) => group.title).join(', ')}</p>
+          <Field label="Starting price ($)" hint="Added to every order before options">
+            <input className="pt-input" inputMode="decimal" value={builder.base ?? 0} onChange={(e) => setBuilder((current) => ({ ...current, base: e.target.value.replace(/[^\d.]/g, '') }))} />
+          </Field>
         )}
       </section>
+
+      {builder.kind === 'cake' ? (
+        <>
+          <p className="pt-muted">Tick what you make and set your price for each. Customers only see the options you tick. Prices are added on top of the shape price.</p>
+          {CAKE_SECTIONS.map((section) => (
+            <OptionEditor key={section.kind} {...section} value={builder[section.kind]} onChange={(list) => setBuilder((current) => ({ ...current, [section.kind]: list }))} />
+          ))}
+        </>
+      ) : (
+        <GroupsEditor groups={builder.groups || []} onChange={(groups) => setBuilder((current) => ({ ...current, groups }))} />
+      )}
 
       <section className="pt-card pt-stack">
         <div className="pt-row"><h2 className="pt-h2">Ready-made cakes</h2><button type="button" className="pt-btn is-ghost" onClick={() => setItems((current) => [...current, { title: '', detail: '', price: '', leadHours: 0 }])}>+ Add item</button></div>
@@ -486,5 +507,163 @@ function BakeryMessages({ conversations, reload }) {
       <p className="pt-muted">Customers can message you before and after ordering. You'll get a text when a new message comes in.</p>
       <ConversationList conversations={conversations} side="bakery" onOpen={setOpen} empty="No messages yet." />
     </div>
+  )
+}
+
+/* ---------- Build-your-own options ---------- */
+
+const CAKE_SECTIONS = [
+  { kind: 'shapes', title: 'Shapes', hint: 'The shape price is the starting price of the cake.', priceLabel: 'Price', required: true },
+  { kind: 'sizes', title: 'Sizes', hint: 'Extra charge on top of the shape price (use a minus for smaller sizes). Set how many people each size serves.', priceLabel: '+ Price', required: true, allowNegative: true },
+  { kind: 'flavours', title: 'Cake flavours', hint: 'The first 8 you tick are shown first; customers can open the full list.', priceLabel: '+ Price', required: true },
+  { kind: 'fillings', title: 'Fillings between layers', hint: 'Price is charged per layer.', priceLabel: '+ Per layer' },
+  { kind: 'frostings', title: 'Outside frosting', priceLabel: '+ Price', required: true },
+  { kind: 'toppings', title: 'Toppings', hint: 'Customers can add as many as they like.', priceLabel: '+ Price' },
+]
+
+function withOptions(builder) {
+  const copy = JSON.parse(JSON.stringify(builder || {}))
+  if (copy.kind !== 'cake') return copy
+  const opts = cakeOptions(copy)
+  return { ...copy, shapes: opts.shapes, sizes: opts.sizes, flavours: opts.flavours, fillings: opts.fillings, frostings: opts.frostings, toppings: opts.toppings, layerPrice: opts.layerPrice, maxLayers: opts.maxLayers }
+}
+
+const num = (value, allowNegative) => {
+  const n = Number(value)
+  if (!Number.isFinite(n)) return 0
+  return Math.round((allowNegative ? n : Math.max(0, n)) * 100) / 100
+}
+
+function cleanBuilder(builder) {
+  const out = { ...builder }
+  if (builder.kind === 'cake') {
+    CAKE_SECTIONS.forEach(({ kind, allowNegative }) => {
+      out[kind] = (builder[kind] || []).map((item) => ({ ...item, label: String(item.label).trim(), price: num(item.price, allowNegative) })).filter((item) => item.label)
+    })
+    out.layerPrice = num(builder.layerPrice)
+  } else {
+    out.base = num(builder.base)
+    out.groups = (builder.groups || []).map((group) => ({
+      ...group,
+      title: String(group.title || '').trim() || 'Options',
+      ...(group.unitPrice != null ? { unitPrice: num(group.unitPrice) } : {}),
+      ...(group.options ? { options: group.options.map((option) => ({ ...option, label: String(option.label).trim(), price: num(option.price) })).filter((option) => option.label) } : {}),
+    }))
+  }
+  return out
+}
+
+function builderProblem(builder) {
+  if (builder.kind === 'cake') {
+    const missing = CAKE_SECTIONS.find((section) => section.required && !(builder[section.kind] || []).length)
+    return missing ? `Tick at least one option under “${missing.title}”.` : ''
+  }
+  const empty = (builder.groups || []).find((group) => ['single', 'multi'].includes(group.type) && group.required && !(group.options || []).some((option) => String(option.label).trim()))
+  return empty ? `Add at least one option to “${empty.title}”.` : ''
+}
+
+const slug = (text) => String(text).toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '').slice(0, 30) || 'item'
+
+function OptionEditor({ kind, title, hint, priceLabel, value, onChange, allowNegative, required }) {
+  const [query, setQuery] = useState('')
+  const [onlyOn, setOnlyOn] = useState(false)
+  const [newName, setNewName] = useState('')
+  const [newPrice, setNewPrice] = useState('')
+  const list = value || []
+  const chosen = new Map(list.map((item) => [item.id, item]))
+  const library = LIBRARY[kind]
+  const custom = list.filter((item) => !library.some((entry) => entry.id === item.id))
+  const rows = [...library, ...custom].map((item) => (chosen.has(item.id) ? { ...item, ...chosen.get(item.id), on: true } : { ...item, on: false }))
+  const q = query.trim().toLowerCase()
+  const shown = rows.filter((row) => (!onlyOn || row.on) && (!q || row.label.toLowerCase().includes(q)))
+  const order = (next) => rows.map((row) => next.find((item) => item.id === row.id)).filter(Boolean).concat(next.filter((item) => !rows.some((row) => row.id === item.id)))
+
+  const toggle = (row) => {
+    if (row.on) onChange(list.filter((item) => item.id !== row.id))
+    else onChange(order([...list, { id: row.id, label: row.label, price: row.price, ...(row.swatch ? { swatch: row.swatch } : {}), ...(row.serves ? { serves: row.serves } : {}) }]))
+  }
+  const setPrice = (id, price) => onChange(list.map((item) => (item.id === id ? { ...item, price } : item)))
+  const addOwn = () => {
+    const label = newName.trim()
+    if (!label) return
+    onChange([...list, { id: `own-${slug(label)}-${Date.now().toString(36)}`, label, price: newPrice || 0 }])
+    setNewName(''); setNewPrice('')
+  }
+
+  return (
+    <section className="pt-card pt-stack">
+      <div className="pt-row">
+        <h2 className="pt-h2">{title}{required ? '' : <span className="pt-muted pt-small"> · optional</span>}</h2>
+        <span className="pt-muted pt-small">{list.length} of {rows.length} on</span>
+      </div>
+      {hint ? <p className="pt-muted pt-small">{hint}</p> : null}
+      <div className="pt-row pt-row-start pt-wrap">
+        {rows.length > 12 ? <input className="pt-input pt-search" type="search" aria-label={`Search ${title}`} placeholder={`Search ${title.toLowerCase()}`} value={query} onChange={(e) => setQuery(e.target.value)} /> : null}
+        <button type="button" className="pt-btn is-ghost is-small" onClick={() => setOnlyOn(!onlyOn)}>{onlyOn ? 'Show all' : 'Show ticked only'}</button>
+        <button type="button" className="pt-btn is-ghost is-small" onClick={() => onChange(rows.map(({ on, ...item }) => (chosen.get(item.id) || item)))}>Tick all</button>
+        <button type="button" className="pt-btn is-ghost is-small" onClick={() => onChange([])}>Untick all</button>
+      </div>
+      <div className="pt-options">
+        {shown.map((row) => (
+          <div key={row.id} className={`pt-option ${row.on ? 'is-on' : ''}`}>
+            <label className="pt-option-name">
+              <input type="checkbox" checked={row.on} onChange={() => toggle(row)} />
+              {row.swatch && row.swatch !== 'marble' && row.swatch !== 'rainbow' ? <span className="pt-swatch" style={{ background: row.swatch }} aria-hidden="true" /> : null}
+              <span>{row.label}</span>
+              {kind === 'sizes' ? <input className="pt-input pt-serves" aria-label={`Serves for ${row.label}`} placeholder="Serves" disabled={!row.on} value={row.serves || ''} onClick={(e) => e.preventDefault()} onChange={(e) => onChange(list.map((item) => (item.id === row.id ? { ...item, serves: e.target.value.slice(0, 12) } : item)))} /> : null}
+            </label>
+            <span className="pt-option-price">
+              <span aria-hidden="true">$</span>
+              <input className="pt-input" inputMode="decimal" aria-label={`${priceLabel} for ${row.label}`} disabled={!row.on} value={row.on ? row.price : row.price} onChange={(e) => setPrice(row.id, e.target.value.replace(allowNegative ? /[^\d.-]/g : /[^\d.]/g, ''))} />
+            </span>
+            {row.id.startsWith('own-') ? <button type="button" className="pt-link-btn" onClick={() => onChange(list.filter((item) => item.id !== row.id))}>Remove</button> : <span />}
+          </div>
+        ))}
+        {!shown.length ? <p className="pt-muted">Nothing matches.</p> : null}
+      </div>
+      <div className="pt-option pt-option-add">
+        <input className="pt-input" aria-label={`New ${title.toLowerCase()} name`} placeholder="Add your own…" value={newName} onChange={(e) => setNewName(e.target.value)} onKeyDown={(e) => { if (e.key === 'Enter') addOwn() }} />
+        <span className="pt-option-price"><span aria-hidden="true">$</span><input className="pt-input" inputMode="decimal" aria-label="Price" placeholder="0" value={newPrice} onChange={(e) => setNewPrice(e.target.value.replace(/[^\d.]/g, ''))} /></span>
+        <button type="button" className="pt-btn is-ghost is-small" onClick={addOwn}>Add</button>
+      </div>
+      <p className="pt-small pt-muted">{priceLabel === 'Price' ? 'Price shown is the full starting price.' : `Column shows the extra charge (${priceLabel.replace('+ ', '').toLowerCase()}).`}</p>
+    </section>
+  )
+}
+
+function GroupsEditor({ groups, onChange }) {
+  const setGroup = (index, patch) => onChange(groups.map((group, i) => (i === index ? { ...group, ...patch } : group)))
+  const setOption = (gi, oi, patch) => setGroup(gi, { options: groups[gi].options.map((option, i) => (i === oi ? { ...option, ...patch } : option)) })
+  return (
+    <>
+      <p className="pt-muted">These are the choices customers make. Rename them, change prices, add or remove options.</p>
+      {groups.map((group, gi) => (
+        <section key={group.id} className="pt-card pt-stack">
+          <div className="pt-row">
+            <input className="pt-input pt-group-title" aria-label="Section name" value={group.title} onChange={(e) => setGroup(gi, { title: e.target.value })} />
+            <span className="pt-muted pt-small">{group.type === 'single' ? 'Pick one' : group.type === 'multi' ? `Pick up to ${group.max || 'any'}` : group.type === 'count' ? 'Number' : 'Free text'}</span>
+          </div>
+          {group.type === 'count' ? (
+            <div className="pt-grid-3">
+              <Field label="Least"><input className="pt-input" type="number" value={group.min ?? 1} onChange={(e) => setGroup(gi, { min: Math.max(0, Number(e.target.value) || 0) })} /></Field>
+              <Field label="Most"><input className="pt-input" type="number" value={group.max ?? 5} onChange={(e) => setGroup(gi, { max: Math.max(1, Number(e.target.value) || 1) })} /></Field>
+              <Field label={`$ per ${group.unitLabel || 'unit'}`}><input className="pt-input" inputMode="decimal" value={group.unitPrice ?? 0} onChange={(e) => setGroup(gi, { unitPrice: e.target.value.replace(/[^\d.]/g, '') })} /></Field>
+            </div>
+          ) : null}
+          {group.options ? (
+            <div className="pt-options">
+              {group.options.map((option, oi) => (
+                <div key={option.id} className="pt-option is-on">
+                  <input className="pt-input" aria-label="Option name" value={option.label} onChange={(e) => setOption(gi, oi, { label: e.target.value })} />
+                  <span className="pt-option-price"><span aria-hidden="true">$</span><input className="pt-input" inputMode="decimal" aria-label={`Price for ${option.label}`} value={option.price} onChange={(e) => setOption(gi, oi, { price: e.target.value.replace(/[^\d.]/g, '') })} /></span>
+                  <button type="button" className="pt-link-btn" disabled={group.required && group.options.length <= 1} onClick={() => setGroup(gi, { options: group.options.filter((_, i) => i !== oi) })}>Remove</button>
+                </div>
+              ))}
+              <button type="button" className="pt-btn is-ghost is-small" onClick={() => setGroup(gi, { options: [...group.options, { id: `own-${Date.now().toString(36)}`, label: '', price: 0 }] })}>+ Add option</button>
+            </div>
+          ) : null}
+        </section>
+      ))}
+    </>
   )
 }
