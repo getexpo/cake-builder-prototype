@@ -3,7 +3,7 @@ import { CATEGORIES, SHOPS } from './catalog.js'
 import { cakeOptions } from './builderLibrary.js'
 import { friendlyError, supabase } from './supabaseClient.js'
 import { STATUS_HINT, addDays, dateLabel, dayStatus, earliestDay, leadFor, noticeLabel, timesOn, vanDate, vanMoment } from './schedule.js'
-import { ChatThread, ConversationList, MonthCalendar, PhoneInput, PhoneVerify, useConversations } from './widgets.jsx'
+import { ChatThread, ConversationList, MonthCalendar, NotificationPrompt, PhoneInput, PhoneVerify, useConversations } from './widgets.jsx'
 import { phoneProblem } from './validate.js'
 import { distanceKm, geocode, kmLabel, shopLocations } from './geo.js'
 import { OccasionsScreen, dismissPrompt, promptDismissed, upcoming, useOccasions } from './Occasions.jsx'
@@ -1868,6 +1868,7 @@ export default function CustomerApp({ ctx }) {
     <div className="ca-root">
       <div className="ca-phone">
         {renderToast()}
+        {signedIn && ['home', 'orders', 'account'].includes(view) ? <NotificationPrompt variant="ca" storageKey="notify-prompt-customer" text="Get notified when your order is confirmed, ready or on its way." /> : null}
         {screen}
         {showNav ? <BottomNav view={view} go={go} cartCount={cartCount} unread={unreadMessages} /> : null}
         {tipPromptOrder && !pendingItem && !(view === 'orders' && openOrderId === tipPromptOrder.id) ? (

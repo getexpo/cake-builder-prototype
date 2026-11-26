@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useState } from 'react'
 import { friendlyError, supabase, uploadDocument } from './supabaseClient.js'
 import { BC_AREAS, Badge, Check, Field, FileField, Loading, Notice, Shell, SignInScreen, WorkEligibility, eligibilityDocs, eligibilityMissing, money, useAccountGate, useSession, when } from './partnerShared.jsx'
-import { PayoutSetup, PhoneInput, PhoneVerify, SetupChecklist, usePayoutSummary } from './widgets.jsx'
+import { NotificationGate, PayoutSetup, PhoneInput, PhoneVerify, SetupChecklist, usePayoutSummary } from './widgets.jsx'
 import { MAKES, VEHICLES, joinVehicle, splitVehicle } from './vehicles.js'
 import { expiryProblem, licenceProblem, phoneProblem, yearProblem } from './validate.js'
 
@@ -51,7 +51,12 @@ export default function DriverApp() {
       />
     )
   }
-  return <DriverHome user={session.user} />
+  // Notifications are mandatory for drivers: nothing else until they're allowed.
+  return (
+    <NotificationGate wrapper={(content) => <Shell title={TITLE} user={session.user}>{content}</Shell>}>
+      <DriverHome user={session.user} />
+    </NotificationGate>
+  )
 }
 
 function DriverHome({ user }) {

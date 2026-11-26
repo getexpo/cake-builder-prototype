@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react'
-import { googleSignIn, peekSignInIntent, supabase, takeSignInIntent } from './supabaseClient.js'
+import { APP_AREA, googleSignIn, peekSignInIntent, supabase, takeSignInIntent } from './supabaseClient.js'
+import { NotificationPrompt } from './widgets.jsx'
 import { OTHER_COUNTRIES, REGIONS, SERVED_COUNTRIES, cleanPostal, postalLabel, postalProblem, regionLabel } from './places.js'
 import './partner.css'
 
@@ -99,6 +100,7 @@ export function Shell({ title, subtitle, user, tabs, tab, onTab, children, wide 
         ) : null}
       </header>
       <main className={`pt-main ${wide ? 'is-wide' : ''}`}>
+        {user && APP_AREA === 'bakery' ? <NotificationPrompt text="Get notified the moment a new order or customer message comes in." /> : null}
         {subtitle ? <p className="pt-muted pt-subtitle">{subtitle}</p> : null}
         {children}
       </main>

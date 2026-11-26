@@ -498,3 +498,90 @@ export function PayoutSetup({ summary, onSaved, allowBusinessNumber = true }) {
 function Notice({ children }) {
   return <p className="cx-notice" role="status">{children}</p>
 }
+
+/* ---------- Browser notification permission ---------- */
+
+const notificationsSupported = () => typeof window !== 'undefined' && 'Notification' in window
+const isIOS = () => typeof navigator !== 'undefined' && /iPhone|iPad|iPod/.test(navigator.userAgent)
+
+export function useNotificationPermission() {
+  const [permission, setPermission] = useState(() => (notificationsSupported() ? window.Notification.permission : 'unsupported'))
+  useEffect(() => {
+    if (!notificationsSupported() || !navigator.permissions?.query) return undefined
+    let status
+    navigator.permissions.query({ name: 'notifications' }).then((result) => {
+      status = result
+      result.onchange = () => setPermission(window.Notification.permission)
+    }).catch(() => {})
+    const onFocus = () => setPermission(window.Notification.permission)
+    window.addEventListener('focus', onFocus)
+    return () => { if (status) status.onchange = null; window.removeEventListener('focus', onFocus) }
+  }, [])
+  async function request() {
+    if (!notificationsSupported()) return 'unsupported'
+    try {
+      const result = await window.Notification.requestPermission()
+      setPermission(result)
+      if (result === 'granted') {
+        try { new window.Notification('Notifications are on', { body: 'We’ll let you know about new orders and updates.' }) } catch { /* some browsers only allow this from a service worker */ }
+      }
+      return result
+    } catch { return window.Notification.permission }
+  }
+  return [permission, request]
+}
+
+function BlockedHelp() {
+  return (
+    <ol className="cx-help-steps">
+      <li>Click the <strong>lock or settings icon</strong> on the left of the address bar.</li>
+      <li>Find <strong>Notifications</strong> and change it to <strong>Allow</strong>.</li>
+      <li>Come back to this page. It updates on its own (or reload the page).</li>
+    </ol>
+  )
+}
+
+// Drivers must allow notifications before they can use the app: job offers are time-sensitive.
+export function NotificationGate({ children, wrapper = (content) => content, title = 'Turn on notifications to continue', reason = 'We send new delivery jobs and updates as notifications. Drivers need them on to use the app.' }) {
+  const [permission, request] = useNotificationPermission()
+  const [skippedUnsupported, setSkipped] = useState(false)
+  if (permission === 'granted' || skippedUnsupported) return children
+  return wrapper(
+    <section className="pt-card pt-stack cx-gate">
+      <span className="cx-gate-icon" aria-hidden="true">🔔</span>
+      <h1 className="pt-h1">{title}</h1>
+      <p className="pt-muted">{reason}</p>
+      {permission === 'default' ? <button type="button" className="pt-btn is-large" onClick={request}>Turn on notifications</button> : null}
+      {permission === 'denied' ? (
+        <>
+          <p className="pt-error" role="alert">Notifications are blocked for this site in your browser.</p>
+          <BlockedHelp />
+          <button type="button" className="pt-btn is-ghost" onClick={() => window.location.reload()}>I’ve allowed them, reload</button>
+        </>
+      ) : null}
+      {permission === 'unsupported' ? (
+        <>
+          <p className="pt-muted">{isIOS() ? 'On iPhone, notifications only work from an app on your Home Screen. Open this page in Safari, tap Share, then “Add to Home Screen”, and open it from there.' : 'This browser can’t show notifications. Please use Chrome, Edge, Firefox or Safari.'}</p>
+          <button type="button" className="pt-btn is-ghost" onClick={() => setSkipped(true)}>Continue with text messages only</button>
+        </>
+      ) : null}
+    </section>
+  )
+}
+
+// Optional prompt for customers and bakeries. Hidden once answered or dismissed.
+export function NotificationPrompt({ text, variant = 'pt', storageKey = 'notify-prompt-dismissed' }) {
+  const [permission, request] = useNotificationPermission()
+  const [dismissed, setDismissed] = useState(() => { try { return window.localStorage.getItem(storageKey) === '1' } catch { return false } })
+  if (permission !== 'default' || dismissed) return null
+  const hide = () => { setDismissed(true); try { window.localStorage.setItem(storageKey, '1') } catch { /* ignore */ } }
+  const btn = variant === 'ca' ? 'ca-btn ca-btn-small' : 'pt-btn is-small'
+  return (
+    <div className={`cx-notify-prompt is-${variant}`} role="region" aria-label="Notifications">
+      <span aria-hidden="true">🔔</span>
+      <span className="cx-notify-text">{text}</span>
+      <button type="button" className={btn} onClick={request}>Turn on</button>
+      <button type="button" className="cx-link" onClick={hide}>Not now</button>
+    </div>
+  )
+}
