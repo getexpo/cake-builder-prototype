@@ -163,3 +163,20 @@ textarea.pt-input { min-height: 72px; resize: vertical; }
 .pt-top-extra { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin-right: auto; margin-left: 12px; }
 .pt-switch { max-width: 240px; padding: 6px 10px; border: 1px solid var(--line); border-radius: 10px; background: #FFFFFF; font: inherit; font-size: 14px; }
 @media (max-width: 640px) { .pt-top-extra { order: 3; width: 100%; margin: 6px 0 0; } }
+.pt-acct { position: relative; }
+.pt-acct-btn { display: inline-flex; align-items: center; gap: 6px; padding: 6px 10px; margin-left: -4px; border: 0; border-radius: 10px; background: transparent; font: inherit; font-weight: 800; font-size: 17px; color: inherit; cursor: pointer; }
+.pt-acct-btn:hover, .pt-acct-btn[aria-expanded="true"] { background: #F5EFEC; }
+.pt-acct-caret { font-size: 12px; opacity: .7; }
+.pt-acct-menu { position: absolute; top: calc(100% + 6px); left: 0; z-index: 50; width: min(340px, 90vw); padding: 8px; background: #FFFFFF; border: 1px solid var(--line); border-radius: 16px; box-shadow: 0 12px 32px rgba(0,0,0,.14); display: flex; flex-direction: column; gap: 2px; }
+.pt-acct-head { margin: 4px 10px 6px; font-size: 12px; font-weight: 700; text-transform: uppercase; letter-spacing: .04em; color: #6B7280; }
+.pt-acct-item { display: flex; align-items: center; gap: 12px; padding: 10px; border: 0; border-radius: 12px; background: transparent; font: inherit; text-align: left; cursor: pointer; color: inherit; }
+.pt-acct-item:hover, .pt-acct-item:focus-visible { background: #F7F3F1; }
+.pt-acct-item.is-current { background: #FDF2F6; }
+.pt-acct-num { width: 30px; height: 30px; flex: none; border-radius: 50%; display: flex; align-items: center; justify-content: center; font-weight: 800; background: #F3E8E2; }
+.pt-acct-text { flex: 1; min-width: 0; display: flex; flex-direction: column; }
+.pt-acct-text span { font-size: 13px; color: #6B7280; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.pt-acct-status { font-size: 12px; font-weight: 700; color: #92400E; background: #FEF3C7; padding: 2px 8px; border-radius: 999px; text-transform: capitalize; }
+.pt-acct-check { color: #BE185D; font-weight: 800; }
+.pt-acct-add { border-top: 1px solid var(--line); border-radius: 0 0 12px 12px; margin-top: 4px; padding-top: 12px; }
+.pt-acct-add .pt-acct-num { background: #BE185D; color: #FFFFFF; }
+.pt-acct-text span { font-weight: 500; }

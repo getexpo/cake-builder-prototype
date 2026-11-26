@@ -86,8 +86,7 @@ export function Shell({ title, subtitle, user, tabs, tab, onTab, children, wide,
     <div className="pt-root">
       <header className="pt-top">
         <div className="pt-top-inner">
-          <a href="/" className="pt-brand" aria-label="Back to the customer app"><span className="pt-logo" aria-hidden="true">🎂</span><span>{title}</span></a>
-          {headerExtra ? <div className="pt-top-extra">{headerExtra}</div> : null}
+          {headerExtra ? <div className="pt-brand"><span className="pt-logo" aria-hidden="true">🎂</span>{headerExtra}</div> : <a href="/" className="pt-brand" aria-label="Back to the customer app"><span className="pt-logo" aria-hidden="true">🎂</span><span>{title}</span></a>}
           {user ? <span className="pt-who"><span className="pt-who-email" title={user.email}>{user.email}</span><button type="button" className="pt-link-btn" onClick={signOut}>Sign out</button></span> : null}
         </div>
         {tabs ? (

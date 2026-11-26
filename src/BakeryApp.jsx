@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import { CATEGORIES, SHOPS } from './catalog.js'
 import { friendlyError, supabase, uploadDocument } from './supabaseClient.js'
 import { Badge, Check, Field, FileField, LocationsEditor, Loading, Notice, Shell, SignInScreen, WorkEligibility, eligibilityDocs, eligibilityMissing, locationsProblem, money, useAccountGate, useSession, when } from './partnerShared.jsx'
@@ -88,15 +88,14 @@ function BakeryHome({ user }) {
   if (applications === undefined) return <Loading title={TITLE} />
 
   const switcher = applications.length ? (
-    <>
-      {applications.length > 1 ? (
-        <select className="pt-switch" aria-label="Switch bakery" value={adding ? '' : application?.id} onChange={(e) => choose(e.target.value)}>
-          {adding ? <option value="">New bakery…</option> : null}
-          {applications.map((item) => <option key={item.id} value={item.id}>{item.business_name}{item.status === 'approved' ? '' : ` (${item.status})`}</option>)}
-        </select>
-      ) : null}
-      {!adding ? <button type="button" className="pt-btn is-ghost is-small" onClick={() => { setAdding(true); setEditing(false) }}>+ Add another bakery</button> : null}
-    </>
+    <AccountMenu
+      applications={applications}
+      bakeries={bakeries}
+      currentId={adding ? '' : application?.id}
+      currentLabel={adding ? 'New bakery' : application?.business_name}
+      onChoose={choose}
+      onAdd={() => { setAdding(true); setEditing(false) }}
+    />
   ) : null
 
   if (!application || editing || adding) {
@@ -146,6 +145,45 @@ function BakeryHome({ user }) {
     )
   }
   return <BakeryDashboard key={bakery.id} user={user} bakery={bakery} application={application} onSaved={load} headerExtra={switcher} />
+}
+
+function AccountMenu({ applications, bakeries, currentId, currentLabel, onChoose, onAdd }) {
+  const [open, setOpen] = useState(false)
+  const ref = useRef(null)
+  useEffect(() => {
+    if (!open) return undefined
+    const close = (event) => { if (!ref.current?.contains(event.target)) setOpen(false) }
+    const esc = (event) => { if (event.key === 'Escape') setOpen(false) }
+    document.addEventListener('mousedown', close); document.addEventListener('keydown', esc)
+    return () => { document.removeEventListener('mousedown', close); document.removeEventListener('keydown', esc) }
+  }, [open])
+  return (
+    <div className="pt-acct" ref={ref}>
+      <button type="button" className="pt-acct-btn" aria-haspopup="menu" aria-expanded={open} onClick={() => setOpen((v) => !v)}>
+        <span>{currentLabel}</span><span className="pt-acct-caret" aria-hidden="true">▾</span>
+      </button>
+      {open ? (
+        <div className="pt-acct-menu" role="menu">
+          <p className="pt-acct-head">Your bakeries</p>
+          {applications.map((item, index) => {
+            const shop = bakeries.find((b) => b.application_id === item.id)
+            const where = [shop?.address || item.address, shop?.area || item.city].filter(Boolean).join(', ')
+            return (
+              <button key={item.id} type="button" role="menuitem" className={`pt-acct-item ${item.id === currentId ? 'is-current' : ''}`} onClick={() => { setOpen(false); onChoose(item.id) }}>
+                <span className="pt-acct-num">{index + 1}</span>
+                <span className="pt-acct-text"><strong>{item.business_name}</strong><span>{where}</span></span>
+                {item.status !== 'approved' ? <span className="pt-acct-status">{item.status === 'pending' ? 'In review' : item.status}</span> : null}
+                {item.id === currentId ? <span className="pt-acct-check" aria-label="Current">✓</span> : null}
+              </button>
+            )
+          })}
+          <button type="button" role="menuitem" className="pt-acct-item pt-acct-add" onClick={() => { setOpen(false); onAdd() }}>
+            <span className="pt-acct-num">+</span><span className="pt-acct-text"><strong>Add another bakery</strong></span>
+          </button>
+        </div>
+      ) : null}
+    </div>
+  )
 }
 
 function BakeryForm({ user, existing, prefill, onDone }) {
