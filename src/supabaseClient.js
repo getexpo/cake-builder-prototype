@@ -43,3 +43,25 @@ export async function documentUrl(path) {
   if (error) throw error
   return data.signedUrl
 }
+
+// Sign up vs log in. Google creates the sign-in itself, so we remember which button was pressed:
+// "login" only lets people in who already have an account in this app; "signup" creates one.
+const INTENT_KEY = `cake-intent-${APP_AREA}`
+export function setSignInIntent(intent) {
+  try { window.sessionStorage.setItem(INTENT_KEY, intent) } catch { /* ignore */ }
+}
+export function takeSignInIntent() {
+  try {
+    const intent = window.sessionStorage.getItem(INTENT_KEY)
+    window.sessionStorage.removeItem(INTENT_KEY)
+    return intent
+  } catch { return null }
+}
+export function peekSignInIntent() {
+  try { return window.sessionStorage.getItem(INTENT_KEY) } catch { return null }
+}
+export function googleSignIn(redirectTo, intent) {
+  setSignInIntent(intent)
+  // select_account makes Google ask which account every time instead of signing in silently.
+  return supabase.auth.signInWithOAuth({ provider: 'google', options: { redirectTo, queryParams: { prompt: 'select_account' } } })
+}

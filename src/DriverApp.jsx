@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState } from 'react'
 import { friendlyError, supabase, uploadDocument } from './supabaseClient.js'
-import { BC_AREAS, Badge, Check, Field, FileField, Loading, Notice, Shell, SignInScreen, money, useSession, when } from './partnerShared.jsx'
+import { BC_AREAS, Badge, Check, Field, FileField, Loading, Notice, Shell, SignInScreen, money, useAccountGate, useSession, when } from './partnerShared.jsx'
 import { PhoneInput, PhoneVerify } from './widgets.jsx'
 import { MAKES, VEHICLES, joinVehicle, splitVehicle } from './vehicles.js'
 import { expiryProblem, licenceProblem, phoneProblem, yearProblem } from './validate.js'
@@ -30,11 +30,17 @@ function mapsLink(text) {
 
 export default function DriverApp() {
   const { loading, session } = useSession()
-  if (loading) return <Loading title={TITLE} />
+  const gate = useAccountGate(session, async (user) => {
+    const { data } = await supabase.from('driver_applications').select('id').eq('user_id', user.id).maybeSingle()
+    return Boolean(data)
+  }, (email) => `There’s no driver account for ${email} yet. Tap “Create a driver account” to apply.`)
+  if (loading || gate.checking) return <Loading title={TITLE} />
   if (!session) {
     return (
       <SignInScreen
         title={TITLE}
+        notice={gate.notice}
+        signupLabel="Create a driver account"
         path="/driver"
         heading="Deliver cakes in your part of BC"
         points={[

@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { supabase } from './supabaseClient.js'
+import { googleSignIn, supabase, takeSignInIntent } from './supabaseClient.js'
 import './App.css'
 import CustomerApp from './CustomerApp.jsx'
 
@@ -617,6 +617,28 @@ function App() {
       if (connectedUserId === session.user.id) return
       connectedUserId = session.user.id
       setCustomerAuthStatus('checking')
+      // "Log in" only works for people who already have a customer account; "Create an account" makes one.
+      const intent = takeSignInIntent()
+      if (intent === 'login' || intent === 'signup') {
+        const user = session.user
+        const [profile, orders] = await Promise.all([
+          supabase.from('customer_profiles').select('user_id').eq('user_id', user.id).maybeSingle(),
+          supabase.from('orders').select('id').eq('customer_id', user.id).limit(1),
+        ])
+        if (cancelled) return
+        const hasAccount = Boolean(profile.data) || Boolean(orders.data?.length) || Boolean(profile.error && orders.error)
+        if (intent === 'login' && !hasAccount) {
+          connectedUserId = ''
+          setCustomerAuthStatus('signed_out')
+          setUiState((current) => ({ ...current, authUpdating: false, error: `There’s no account for ${user.email} yet. Tap “Create an account” to sign up.` }))
+          setView('auth')
+          await supabase.auth.signOut()
+          return
+        }
+        if (!profile.data) {
+          await supabase.from('customer_profiles').upsert({ user_id: user.id, name: user.user_metadata?.full_name || null, email: user.email, updated_at: new Date().toISOString() })
+        }
+      }
       try {
         const response = await apiFetch('/api/auth/google', {
           method: 'POST',
@@ -1692,22 +1714,19 @@ function App() {
     setUiState((current) => ({ ...current, error: '', message: '' }))
   }
 
-  async function startGoogleSignIn() {
-    setUiState((current) => ({ ...current, authUpdating: true, error: '', message: '' }))
+  async function startGoogleSignIn(intent = 'login') {
+    setUiState((current) => ({ ...current, authUpdating: intent, error: '', message: '' }))
     saveAuthReturn({ view: view === 'auth' ? authReturnView : view })
-    const { error } = await supabase.auth.signInWithOAuth({
-      provider: 'google',
-      options: { redirectTo: window.location.origin },
-    })
+    const { error } = await googleSignIn(window.location.origin, intent)
     if (error) {
       clearAuthReturn()
       setUiState((current) => ({ ...current, authUpdating: false, error: 'Could not open Google sign-in. Please try again.' }))
     }
   }
 
-  async function continueWithSignIn() {
+  async function continueWithSignIn(intent = 'login') {
     if (supabase) {
-      await startGoogleSignIn()
+      await startGoogleSignIn(intent)
       return
     }
     setUiState((current) => ({ ...current, authUpdating: true, error: '', message: '' }))

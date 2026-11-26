@@ -299,3 +299,4 @@
 .ca-loc-text { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px; }
 .ca-loc-km { display: flex; flex-direction: column; align-items: flex-end; gap: 4px; flex: none; font-weight: 700; }
 .ca-loc-nearest { padding: 2px 8px; border-radius: 999px; background: #DCFCE7; color: #166534; font-size: 12px; font-weight: 800; }
+.ca-link.ca-center { align-self: center; min-height: 44px; }

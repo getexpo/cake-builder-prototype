@@ -1772,15 +1772,18 @@ export default function CustomerApp({ ctx }) {
       <div className="ca-screen ca-auth">
         <div className="ca-auth-art" aria-hidden="true"><Icon name="cake" size={56} /></div>
         <div className="ca-pad ca-stack-12">
-          <h1 className="ca-h1">Sign in to continue</h1>
-          <p className="ca-muted ca-lh">Sign in to place orders, save addresses and see your order history. Your cart is kept while you sign in.</p>
+          <h1 className="ca-h1">Sign in or create an account</h1>
+          <p className="ca-muted ca-lh">You need an account to place orders, save addresses and see your order history. Your cart is kept while you sign in.</p>
           {uiState.error ? <p className="ca-toast is-error is-inline">{uiState.error}</p> : null}
         </div>
         <div className="ca-pad ca-stack-10 ca-auth-actions">
-          <button type="button" className="ca-btn" disabled={uiState.authUpdating || checking} onClick={ctx.continueWithSignIn}>
-            {uiState.authUpdating ? 'Opening Google…' : checking ? 'Signing you in…' : ctx.googleEnabled ? 'Continue with Google' : 'Sign in'}
+          <button type="button" className="ca-btn" disabled={Boolean(uiState.authUpdating) || checking} onClick={() => ctx.continueWithSignIn('login')}>
+            {uiState.authUpdating === 'login' ? 'Opening Google…' : checking ? 'Signing you in…' : 'Log in'}
           </button>
-          <button type="button" className="ca-btn ca-btn-ghost" onClick={() => setView(ctx.authReturnView || 'home')}>Not now</button>
+          <button type="button" className="ca-btn ca-btn-ghost" disabled={Boolean(uiState.authUpdating) || checking} onClick={() => ctx.continueWithSignIn('signup')}>
+            {uiState.authUpdating === 'signup' ? 'Opening Google…' : 'Create an account'}
+          </button>
+          <button type="button" className="ca-link ca-center" onClick={() => setView(ctx.authReturnView || 'home')}>Not now</button>
         </div>
       </div>
     )

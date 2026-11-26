@@ -1,7 +1,7 @@
 import { Fragment, useCallback, useEffect, useState } from 'react'
 import { CATEGORIES } from './catalog.js'
 import { documentUrl, friendlyError, supabase } from './supabaseClient.js'
-import { Badge, Loading, Notice, Shell, SignInScreen, money, useSession, when } from './partnerShared.jsx'
+import { Badge, Loading, Notice, Shell, SignInScreen, money, useAccountGate, useSession, when } from './partnerShared.jsx'
 import { ChatThread, ConversationList, useConversations } from './widgets.jsx'
 
 const TITLE = 'Admin'
@@ -9,14 +9,19 @@ const TITLE = 'Admin'
 export default function AdminApp() {
   const { loading, session } = useSession()
   const [allowed, setAllowed] = useState(undefined)
+  // Admins are never created by signing in: anyone who isn't on the admin list is signed straight out.
+  const gate = useAccountGate(session, async () => {
+    const { data } = await supabase.rpc('is_admin')
+    return Boolean(data)
+  }, (email) => `${email} is not an admin account.`)
 
   useEffect(() => {
     if (!session) return
     supabase.rpc('is_admin').then(({ data }) => setAllowed(Boolean(data)))
   }, [session])
 
-  if (loading) return <Loading title={TITLE} />
-  if (!session) return <SignInScreen title={TITLE} path="/admin" heading="Admin sign-in" points={['Only approved admin accounts can open this page.']} />
+  if (loading || gate.checking) return <Loading title={TITLE} />
+  if (!session) return <SignInScreen title={TITLE} path="/admin" heading="Admin sign-in" notice={gate.notice} signup={false} points={['Only approved admin accounts can open this page.']} />
   if (allowed === undefined) return <Loading title={TITLE} />
   if (!allowed) return <Shell title={TITLE} user={session.user}><Notice kind="error">{session.user.email} is not an admin account.</Notice></Shell>
   return <AdminHome user={session.user} />

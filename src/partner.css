@@ -143,3 +143,5 @@ textarea.pt-input { min-height: 72px; resize: vertical; }
 .pt-serves { width: 84px; min-height: 36px !important; padding: 0 8px; font-weight: 500; margin-left: auto; }
 .pt-field-error { font-size: 13px; color: #991B1B; font-weight: 600; }
 .pt-location { display: flex; flex-direction: column; gap: 12px; padding: 14px; border: 1px solid var(--line); border-radius: 14px; background: #FFFFFF; }
+.pt-auth-buttons { display: flex; flex-direction: column; gap: 10px; width: 100%; max-width: 420px; }
+.pt-notice-box { margin: 0 0 12px; padding: 12px 14px; border-radius: 12px; background: #FEF3C7; color: #78350F; font-weight: 600; max-width: 420px; }

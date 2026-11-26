@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useState } from 'react'
 import { CATEGORIES, SHOPS } from './catalog.js'
 import { friendlyError, supabase, uploadDocument } from './supabaseClient.js'
-import { Badge, Check, Field, FileField, LocationsEditor, Loading, Notice, Shell, SignInScreen, locationsProblem, money, useSession, when } from './partnerShared.jsx'
+import { Badge, Check, Field, FileField, LocationsEditor, Loading, Notice, Shell, SignInScreen, locationsProblem, money, useAccountGate, useSession, when } from './partnerShared.jsx'
 import { newLocation, shopLocations, withCoordinates } from './geo.js'
 import { DEFAULT_TIMES, NOTICE_OPTIONS, WEEKDAYS, dateLabel, timeLabel, vanDate, weekday } from './schedule.js'
 import { LIBRARY, cakeOptions } from './builderLibrary.js'
@@ -24,11 +24,17 @@ export function templateFor(category) {
 
 export default function BakeryApp() {
   const { loading, session } = useSession()
-  if (loading) return <Loading title={TITLE} />
+  const gate = useAccountGate(session, async (user) => {
+    const { data } = await supabase.from('bakery_applications').select('id').eq('user_id', user.id).maybeSingle()
+    return Boolean(data)
+  }, (email) => `There’s no bakery account for ${email} yet. Tap “Create a bakery account” to apply.`)
+  if (loading || gate.checking) return <Loading title={TITLE} />
   if (!session) {
     return (
       <SignInScreen
         title={TITLE}
+        notice={gate.notice}
+        signupLabel="Create a bakery account"
         path="/bakery"
         heading="Sell your cakes to customers across BC"
         points={[

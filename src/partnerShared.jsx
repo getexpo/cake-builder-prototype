@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { supabase } from './supabaseClient.js'
+import { googleSignIn, peekSignInIntent, supabase, takeSignInIntent } from './supabaseClient.js'
 import { OTHER_COUNTRIES, REGIONS, SERVED_COUNTRIES, cleanPostal, postalLabel, postalProblem, regionLabel } from './places.js'
 import './partner.css'
 
@@ -21,8 +21,31 @@ export function useSession() {
   return state
 }
 
-export function signInWithGoogle(path) {
-  return supabase.auth.signInWithOAuth({ provider: 'google', options: { redirectTo: `${window.location.origin}${path}` } })
+export function signInWithGoogle(path, intent = 'login') {
+  return googleSignIn(`${window.location.origin}${path}`, intent)
+}
+
+// After Google sends someone back: if they pressed "Log in" but have no account in this app,
+// sign them out again and say so, instead of quietly creating one.
+export function useAccountGate(session, hasAccount, noAccountText) {
+  const userId = session?.user?.id
+  const [state, setState] = useState(() => ({ checking: peekSignInIntent() === 'login', notice: '' }))
+  useEffect(() => {
+    if (!userId) return undefined
+    const intent = takeSignInIntent()
+    if (intent !== 'login') { setState((current) => (current.checking ? { ...current, checking: false } : current)); return undefined }
+    let live = true
+    setState({ checking: true, notice: '' })
+    Promise.resolve(hasAccount(session.user)).catch(() => true).then(async (ok) => {
+      if (!live) return
+      if (ok) { setState({ checking: false, notice: '' }); return }
+      const email = session.user.email
+      await supabase.auth.signOut()
+      setState({ checking: false, notice: noAccountText ? noAccountText(email) : `There’s no account for ${email} here yet. Tap “Create an account” to sign up.` })
+    })
+    return () => { live = false }
+  }, [userId]) // eslint-disable-line react-hooks/exhaustive-deps
+  return state
 }
 
 export function signOut() {
@@ -83,9 +106,14 @@ export function Shell({ title, subtitle, user, tabs, tab, onTab, children, wide 
   )
 }
 
-export function SignInScreen({ title, heading, points, path }) {
+export function SignInScreen({ title, heading, points, path, notice, signup = true, signupLabel = 'Create an account' }) {
   const [error, setError] = useState('')
-  const [busy, setBusy] = useState(false)
+  const [busy, setBusy] = useState('')
+  const go = async (intent) => {
+    setBusy(intent); setError('')
+    const { error: err } = await signInWithGoogle(path, intent)
+    if (err) { setError(err.message); setBusy('') }
+  }
   return (
     <Shell title={title}>
       <section className="pt-hero">
@@ -93,12 +121,13 @@ export function SignInScreen({ title, heading, points, path }) {
         <ul className="pt-points">
           {points.map((point) => <li key={point}>{point}</li>)}
         </ul>
+        {notice ? <p className="pt-notice-box" role="alert">{notice}</p> : null}
         {supabase ? (
-          <button type="button" className="pt-btn is-large" disabled={busy} onClick={async () => {
-            setBusy(true)
-            const { error: err } = await signInWithGoogle(path)
-            if (err) { setError(err.message); setBusy(false) }
-          }}>{busy ? 'Opening Google…' : 'Continue with Google'}</button>
+          <div className="pt-auth-buttons">
+            {signup ? <button type="button" className="pt-btn is-large" disabled={Boolean(busy)} onClick={() => go('signup')}>{busy === 'signup' ? 'Opening Google…' : signupLabel}</button> : null}
+            <button type="button" className={`pt-btn is-large ${signup ? 'is-ghost' : ''}`} disabled={Boolean(busy)} onClick={() => go('login')}>{busy === 'login' ? 'Opening Google…' : signup ? 'I already have an account — Log in' : 'Log in with Google'}</button>
+            <p className="pt-small pt-muted">Uses your Google account. You can use the same email here and in the customer app; each has its own sign-in.</p>
+          </div>
         ) : <p className="pt-error">Sign-in is not configured on this site.</p>}
         {error ? <p className="pt-error" role="alert">{error}</p> : null}
       </section>
