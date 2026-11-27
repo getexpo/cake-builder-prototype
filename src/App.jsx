@@ -896,6 +896,9 @@ function App() {
   const checkoutReady = checkoutBlockers.length === 0
 
   const hydrateData = useCallback(async (tokens, { preserveMessage = true } = {}) => {
+    // The old demo backend only exists in local development. In production everything runs on Supabase,
+    // so never probe for it (it scanned localhost ports in every visitor's browser and showed an error).
+    if (!HAS_REMOTE_API) { setUiState((current) => (current.loading ? { ...current, loading: false } : current)); return }
     const seq = ++hydrateSeqRef.current
     setUiState((current) => ({ ...current, loading: true, error: preserveMessage ? current.error : '', message: preserveMessage ? current.message : '' }))
     try {
@@ -1133,6 +1136,7 @@ function App() {
 
   useEffect(() => {
     async function bootstrap() {
+      if (!HAS_REMOTE_API) return
       setUiState((current) => ({ ...current, loading: true, error: '', message: '' }))
       try {
         const roleOrder = ['customer', 'owner', 'staff', 'admin']

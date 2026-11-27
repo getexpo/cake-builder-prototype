@@ -187,3 +187,8 @@ textarea.pt-input { min-height: 72px; resize: vertical; }
 .pt-invite { max-width: 520px; margin: 0 auto; }
 .pt-eyebrow { margin: 0; font-size: 13px; font-weight: 700; letter-spacing: .06em; text-transform: uppercase; color: #9D174D; }
 .pt-btn.is-danger { background: #B91C1C; border-color: #B91C1C; color: #FFFFFF; }
+.pt-flag { display: inline-block; margin-top: 4px; margin-right: 6px; padding: 2px 8px; border-radius: 999px; font-size: 12px; font-weight: 700; }
+.pt-flag.is-info { background: #DBEAFE; color: #1E3A8A; }
+.pt-flag.is-warn { background: #FEF3C7; color: #78350F; }
+.pt-flag.is-bad { background: #FEE2E2; color: #991B1B; }
+.pt-flag.is-good { background: #DCFCE7; color: #166534; }

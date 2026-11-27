@@ -310,3 +310,78 @@
 .ca-tip-input strong { flex: none; }
 .ca-tip-card { padding: 16px; border: 1px solid var(--line); border-radius: 16px; background: var(--accent-wash); }
 .ca-modal { max-height: calc(100dvh - 40px); overflow-y: auto; }
+
+/* Bakery covers */
+.ca-store-cover { position: relative; display: block; }
+.ca-cake-art { display: flex; align-items: flex-end; justify-content: center; overflow: hidden; }
+.ca-cake-art svg { width: 100%; height: 100%; display: block; }
+.ca-store-photo.ca-cake-art { height: 150px; border-radius: 16px; }
+.ca-banner-photo.ca-cake-art { height: 100%; }
+.ca-cover-tag { position: absolute; top: 10px; left: 10px; padding: 3px 10px; border-radius: 999px; font-size: 12px; font-weight: 700; background: rgba(255,255,255,.92); color: #57534E; }
+.ca-cover-tag.is-new { background: #BE185D; color: #FFFFFF; }
+.ca-store-facts { display: flex; gap: 6px; flex-wrap: wrap; margin-top: 4px; }
+.ca-store-facts span { font-size: 12.5px; font-weight: 600; color: #44403C; background: #F5F5F4; padding: 3px 9px; border-radius: 999px; }
+.ca-how { border-radius: 18px; padding: 16px; background: #FDF2F6; display: flex; flex-direction: column; gap: 10px; }
+.ca-how-title { font-size: 16px; }
+.ca-how-steps { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 8px; font-size: 14px; color: #44403C; }
+.ca-how-steps li { display: flex; align-items: center; gap: 10px; }
+.ca-how-steps span { width: 24px; height: 24px; flex: none; border-radius: 50%; background: #BE185D; color: #FFFFFF; font-size: 12px; font-weight: 800; display: flex; align-items: center; justify-content: center; }
+.ca-preview-note { padding: 12px 14px; border-radius: 12px; background: #FEF3C7; color: #78350F; font-size: 14px; line-height: 1.4; }
+.ca-empty-block { display: flex; flex-direction: column; gap: 4px; padding: 20px; border: 1px dashed #D6D3D1; border-radius: 16px; text-align: center; }
+
+/* Order cards */
+.ca-order-card { display: flex; flex-direction: column; align-items: stretch; gap: 12px; width: 100%; padding: 12px; border: 1px solid #E7E5E4; border-radius: 16px; background: #FFFFFF; text-align: left; font: inherit; color: inherit; cursor: pointer; }
+.ca-order-card.is-cancelled { opacity: .7; }
+.ca-order-top { width: 100%; align-self: stretch; display: flex; gap: 12px; align-items: flex-start; }
+.ca-order-thumb.ca-cake-art { width: 64px; height: 64px; flex: none; border-radius: 12px; }
+.ca-order-text { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px; }
+.ca-status-chip { flex: none; font-size: 12px; font-weight: 700; padding: 3px 9px; border-radius: 999px; background: #F5F5F4; color: #44403C; }
+.ca-status-chip.is-new { background: #FEF3C7; color: #78350F; }
+.ca-status-chip.is-confirmed, .ca-status-chip.is-baking { background: #FCE7F3; color: #9D174D; }
+.ca-status-chip.is-ready, .ca-status-chip.is-out_for_delivery { background: #DBEAFE; color: #1E3A8A; }
+.ca-status-chip.is-delivered, .ca-status-chip.is-picked_up { background: #DCFCE7; color: #166534; }
+.ca-status-chip.is-cancelled { background: #FEE2E2; color: #991B1B; }
+.ca-track { width: 100%; align-self: stretch; display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 6px; }
+.ca-track-step { display: flex; flex-direction: column; gap: 4px; }
+.ca-track-bar { height: 4px; border-radius: 4px; background: #E7E5E4; }
+.ca-track-step.is-on .ca-track-bar { background: #BE185D; }
+.ca-track-label { font-size: 11px; color: #78716C; }
+.ca-track-step.is-on .ca-track-label { color: #1C1917; font-weight: 600; }
+
+/* Compact layout, closer to food-delivery apps: more on screen, smaller boxes */
+.ca-h1 { font-size: 22px; }
+.ca-h2 { font-size: 18px; margin-bottom: 10px; }
+.ca-mb-0 { margin-bottom: 0; }
+.ca-section { margin-top: 16px; }
+.ca-home-head { padding-top: 12px; }
+.ca-home-place { font-size: 16px; }
+.ca-segmented button { height: 34px; font-size: 13.5px; }
+.ca-search-fake, .ca-search { height: 42px; border-radius: 12px; font-size: 14.5px; }
+.ca-cats { padding-top: 10px; }
+.ca-cat { min-height: 34px; padding: 0 12px; font-size: 13.5px; }
+.ca-store-card { gap: 8px; }
+.ca-store-photo.ca-cake-art { height: 118px; border-radius: 14px; }
+.ca-store-name { font-size: 15.5px; }
+.ca-store-text .ca-muted { font-size: 13.5px; }
+.ca-store-facts span { font-size: 12px; padding: 2px 8px; }
+.ca-how-strip { list-style: none; margin: 0; padding: 0; display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 6px; }
+.ca-how-strip li { display: flex; align-items: center; gap: 6px; padding: 8px; border-radius: 12px; background: #FDF2F6; font-size: 12.5px; font-weight: 600; color: #44403C; line-height: 1.2; }
+.ca-how-strip span { width: 20px; height: 20px; flex: none; border-radius: 50%; background: #BE185D; color: #FFFFFF; font-size: 11px; font-weight: 800; display: flex; align-items: center; justify-content: center; }
+.ca-carousel { display: flex; gap: 10px; overflow-x: auto; padding: 0 20px 4px; scrollbar-width: none; -webkit-overflow-scrolling: touch; }
+.ca-carousel::-webkit-scrollbar { display: none; }
+.ca-mini-card { flex: none; width: 200px; display: flex; flex-direction: column; gap: 4px; padding: 0; border: 0; background: none; text-align: left; font: inherit; color: inherit; scroll-snap-align: start; cursor: pointer; }
+.ca-mini-photo.ca-cake-art { height: 96px; border-radius: 12px; }
+.ca-mini-name { font-size: 14px; font-weight: 700; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.ca-mini-meta { font-size: 12px; color: #78716C; }
+.ca-banner-photo { height: 150px; }
+.ca-menu-row { padding: 12px 0; gap: 12px; }
+.ca-menu-thumb { width: 84px; height: 84px; border-radius: 12px; }
+.ca-option-section { padding-top: 16px; padding-bottom: 16px; }
+.ca-option-card { padding: 11px 12px; gap: 12px; border-radius: 14px; }
+.ca-option-text strong { font-size: 15px; }
+.ca-shape-grid .ca-tile { padding: 10px; gap: 6px; border-radius: 14px; }
+.ca-shape-grid .ca-shape { width: 44px; height: 44px; }
+.ca-shape-grid .ca-tile-row { flex-direction: column; align-items: center; gap: 0; font-size: 13px; text-align: center; }
+.ca-carousel { scroll-padding-left: 20px; scroll-padding-right: 20px; }
+.ca-banner.is-tall .ca-banner-photo { height: 170px; }
+.ca-stack-view.is-banner { height: 170px; padding-bottom: 14px; }

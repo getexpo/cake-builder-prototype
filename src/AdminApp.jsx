@@ -63,6 +63,7 @@ function AdminHome({ user }) {
     { id: 'bakeries', label: 'Bakeries', count: pendingBakeries },
     { id: 'orders', label: 'Orders', count: openOrders },
     { id: 'messages', label: 'Messages', count: adminUnread },
+    { id: 'settings', label: 'Settings' },
   ]
 
   return (
@@ -72,6 +73,7 @@ function AdminHome({ user }) {
       {tab === 'bakeries' ? <Applications kind="bakery" rows={bakeries} shops={shops} onChanged={load} /> : null}
       {tab === 'orders' ? <Orders orders={orders} onChanged={load} /> : null}
       {tab === 'messages' ? <AdminMessages conversations={allChats} reload={reloadChats} /> : null}
+      {tab === 'settings' ? <AdminSettings liveCount={shops.filter((shop) => shop.active).length} /> : null}
     </Shell>
   )
 }
@@ -92,7 +94,7 @@ function Applications({ kind, rows, shops = [], onChanged }) {
       {shown.map((row) => (
         <article key={row.id} className="pt-card pt-stack">
           <button type="button" className="pt-row pt-reset" aria-expanded={openId === row.id} onClick={() => setOpenId(openId === row.id ? '' : row.id)}>
-            <span><strong>{kind === 'driver' ? row.full_name : row.business_name}</strong><br /><span className="pt-muted pt-small">{row.city} · applied {when(row.created_at)}</span></span>
+            <span><strong>{kind === 'driver' ? row.full_name : row.business_name}</strong><br /><span className="pt-muted pt-small">{row.city} · applied {when(row.created_at)}</span>{kind === 'driver' ? <LicenceFlag row={row} /> : null}</span>
             <Badge status={row.status} />
           </button>
           {openId === row.id ? <Review kind={kind} row={row} shop={shops.find((shop) => shop.application_id === row.id) || shops.find((shop) => !shop.application_id && shop.owner_id === row.user_id)} onChanged={onChanged} /> : null}
@@ -125,6 +127,7 @@ function Review({ kind, row, shop, onChanged }) {
     ? [
         ['Email', row.email], ['Phone', row.phone], ['Area', row.city], ['19+ and can work in Canada', row.over_19 ? 'Yes' : 'No'],
         ['Licence', `${row.licence_class || ''} · ${row.licence_number || ''} · expires ${row.licence_expiry || '?'}`],
+        ['Licence last renewed', row.licence_renewed_at ? when(row.licence_renewed_at) : 'Not since applying'],
         ['Vehicle', [row.vehicle_year, row.vehicle_make_model, row.vehicle_type].filter(Boolean).join(' ')],
         ['Fits large cakes', row.fits_large_cakes ? 'Yes' : 'No'], ['Air conditioning', row.has_ac ? 'Yes' : 'No'],
         ['Insurance covers delivery', row.insurance_confirmed ? 'Confirmed by driver' : 'Not confirmed'],
@@ -257,6 +260,62 @@ function AdminMessages({ conversations, reload }) {
     <div className="pt-stack">
       <p className="pt-muted">Every customer chat. Demo shops have no owner, so answer their customers here. Your replies show as the shop.</p>
       <ConversationList conversations={conversations} side="admin" onOpen={setOpen} empty="No messages yet." />
+    </div>
+  )
+}
+
+function licenceDays(date) {
+  if (!date) return null
+  const today = new Date().toLocaleDateString('en-CA', { timeZone: 'America/Vancouver' })
+  return Math.round((Date.parse(`${date}T00:00:00Z`) - Date.parse(`${today}T00:00:00Z`)) / 86400000)
+}
+
+// Shows on each driver row: a recent licence renewal (to double-check the new photos), or an expiry coming up.
+function LicenceFlag({ row }) {
+  const days = licenceDays(row.licence_expiry)
+  const renewed = row.licence_renewed_at && Date.now() - new Date(row.licence_renewed_at).getTime() < 14 * 86400000
+  const flags = []
+  if (renewed) flags.push(<span key="r" className="pt-flag is-info">Licence renewed {when(row.licence_renewed_at)}: check the new photos</span>)
+  if (days != null && days < 0) flags.push(<span key="e" className="pt-flag is-bad">Licence expired</span>)
+  else if (days != null && days <= 30) flags.push(<span key="s" className="pt-flag is-warn">Licence expires in {days} day{days === 1 ? '' : 's'}</span>)
+  return flags.length ? <><br />{flags}</> : null
+}
+
+function AdminSettings({ liveCount }) {
+  const [settings, setSettings] = useState(null)
+  const [busy, setBusy] = useState(false)
+  const [error, setError] = useState('')
+  const load = useCallback(async () => {
+    const { data, error: err } = await supabase.from('app_settings').select('key, value')
+    if (err) setError(friendlyError(err))
+    setSettings(Object.fromEntries((data || []).map((row) => [row.key, row.value])))
+  }, [])
+  useEffect(() => { load() }, [load])
+  const on = (key, fallback) => {
+    const value = settings?.[key]
+    return value == null ? fallback : value === true || value === 'true'
+  }
+  async function setSetting(key, value) {
+    setBusy(true); setError('')
+    const { error: err } = await supabase.rpc('admin_set_setting', { p_key: key, p_value: value })
+    if (err) setError(friendlyError(err))
+    await load()
+    setBusy(false)
+  }
+  if (!settings) return <p className="pt-muted" role="status">Loading…</p>
+  const samples = on('show_sample_shops', true)
+  return (
+    <div className="pt-stack">
+      <section className="pt-card pt-stack">
+        <div className="pt-row"><h2 className="pt-h2">Sample bakeries</h2><span className={`pt-flag ${samples ? 'is-warn' : 'is-good'}`}>{samples ? 'Showing to customers' : 'Hidden'}</span></div>
+        <p className="pt-muted">The 20 sample bakeries show customers how the app works. They are labelled “Preview” and can’t take orders. Hide them once enough real bakeries are live. You have {liveCount} live {liveCount === 1 ? 'bakery' : 'bakeries'} now.</p>
+        <button type="button" className={`pt-btn ${samples ? '' : 'is-ghost'}`} disabled={busy} onClick={() => setSetting('show_sample_shops', !samples)}>{samples ? 'Hide sample bakeries' : 'Show sample bakeries again'}</button>
+      </section>
+      <section className="pt-card pt-stack">
+        <div className="pt-row"><h2 className="pt-h2">Text messages</h2><span className={`pt-flag ${on('sms_enabled', false) ? 'is-good' : 'is-warn'}`}>{on('sms_enabled', false) ? 'On' : 'Off'}</span></div>
+        <p className="pt-muted">{on('sms_enabled', false) ? 'Phone codes, order updates and licence reminders are being texted.' : 'Off until Twilio is set up. Phone numbers are accepted without a code, and no texts go out.'}</p>
+      </section>
+      {error ? <Notice kind="error">{error}</Notice> : null}
     </div>
   )
 }

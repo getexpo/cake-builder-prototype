@@ -8,6 +8,7 @@ import { phoneProblem } from './validate.js'
 import { distanceKm, geocode, kmLabel, shopLocations } from './geo.js'
 import { OccasionsScreen, dismissPrompt, promptDismissed, upcoming, useOccasions } from './Occasions.jsx'
 import { countdown, occasionTitle } from './occasions.js'
+import { BRAND } from './brand.js'
 import './customer.css'
 
 // Customer-facing app (redesign). All data and actions come from App via `ctx`,
@@ -34,6 +35,10 @@ const DELIVERY_STEPS = [
   { id: 'delivered', label: 'Delivered' },
 ]
 const STATUS_TEXT = { new: 'Waiting for the bakery', confirmed: 'Confirmed', baking: 'Baking', ready: 'Ready', out_for_delivery: 'On the way', picked_up: 'Picked up', delivered: 'Delivered', cancelled: 'Cancelled' }
+
+const DONE_STATUSES = ['delivered', 'picked_up', 'cancelled']
+const PICKUP_TRACK = [{ label: 'Placed', statuses: ['new'] }, { label: 'Confirmed', statuses: ['confirmed'] }, { label: 'Baking', statuses: ['baking'] }, { label: 'Ready', statuses: ['ready'] }]
+const DELIVERY_TRACK = [{ label: 'Placed', statuses: ['new'] }, { label: 'Confirmed', statuses: ['confirmed'] }, { label: 'Baking', statuses: ['baking', 'ready'] }, { label: 'On the way', statuses: ['out_for_delivery'] }]
 
 const DETAILS_KEY = 'cake-customer-details'
 const DELIVERY_FEE = 7.99
@@ -365,6 +370,53 @@ function Photo({ tint = '#F3E8E2', icon = 'cake', size = 30, className = '' }) {
   )
 }
 
+// A drawn cake for each bakery's cover until bakeries upload photos. Varies by shop so cards don't repeat.
+function hashOf(text) {
+  let h = 0
+  for (const ch of String(text)) h = (h * 31 + ch.charCodeAt(0)) >>> 0
+  return h
+}
+const CAKE_PALETTES = [
+  ['#F9D7E0', '#E88AA6', '#FFF4F7'], ['#FBE3C4', '#D9935B', '#FFF8EE'], ['#DDEBD5', '#7FAE74', '#F6FBF3'],
+  ['#E3DCF5', '#9480C9', '#F8F5FF'], ['#D6E8F2', '#6FA3C2', '#F3F9FC'], ['#F6E2D8', '#C97B5D', '#FFF7F3'],
+]
+function CakeArt({ seed, className = '' }) {
+  const h = hashOf(seed)
+  const [cream, accent, ground] = CAKE_PALETTES[h % CAKE_PALETTES.length]
+  const tiers = h % 3 === 0 ? 3 : 2
+  const topper = (h >>> 3) % 3
+  const widths = tiers === 3 ? [150, 112, 76] : [150, 104]
+  const tierH = tiers === 3 ? 34 : 42
+  let y = 128
+  const parts = widths.map((w, i) => {
+    y -= tierH
+    const x = 160 - w / 2
+    const drip = Array.from({ length: Math.floor(w / 18) }, (_, k) => `Q ${x + k * 18 + 9} ${y + 12 + ((k + i) % 2) * 7} ${x + (k + 1) * 18} ${y + 6}`).join(' ')
+    return (
+      <g key={i}>
+        <rect x={x} y={y} width={w} height={tierH} rx="8" fill={cream} />
+        <path d={`M ${x} ${y + 6} ${drip} L ${x + w} ${y + 6} L ${x + w} ${y + 4} Q ${x + w} ${y} ${x + w - 8} ${y} L ${x + 8} ${y} Q ${x} ${y} ${x} ${y + 4} Z`} fill={accent} />
+        <rect x={x} y={y + tierH - 6} width={w} height="4" fill={accent} opacity="0.35" />
+      </g>
+    )
+  })
+  const topY = y
+  return (
+    <div className={`ca-cake-art ${className}`} style={{ background: ground }} aria-hidden="true">
+      <svg viewBox="0 0 320 150" preserveAspectRatio="xMidYMax meet">
+        <ellipse cx="160" cy="132" rx="104" ry="9" fill={accent} opacity="0.18" />
+        <rect x="58" y="126" width="204" height="6" rx="3" fill="#FFFFFF" stroke={accent} strokeOpacity="0.35" />
+        {parts}
+        {topper === 0 ? [148, 160, 172].map((cx, i) => (
+          <g key={cx}><rect x={cx - 2} y={topY - 20} width="4" height="20" rx="2" fill={i === 1 ? accent : '#FFFFFF'} stroke={accent} strokeWidth="1" /><path d={`M ${cx} ${topY - 30} q 4 6 0 9 q -4 -3 0 -9`} fill="#F59E0B" /></g>
+        )) : null}
+        {topper === 1 ? [146, 160, 174].map((cx) => <circle key={cx} cx={cx} cy={topY - 6} r="7" fill="#E11D48" opacity="0.85" />) : null}
+        {topper === 2 ? <path d={`M 160 ${topY - 26} c -10 -12 -24 0 0 18 c 24 -18 10 -30 0 -18`} fill={accent} /> : null}
+      </svg>
+    </div>
+  )
+}
+
 function TopBar({ title, onBack, right }) {
   return (
     <header className="ca-topbar">
@@ -440,7 +492,9 @@ export default function CustomerApp({ ctx }) {
   const [itemId, setItemId] = useState('')
   const [itemNote, setItemNote] = useState('')
   const [liveShops, setLiveShops] = useState([])
-  const bakeries = useMemo(() => [...liveShops, ...SHOPS], [liveShops])
+  // Sample bakeries show how the app works until real ones join. Admin turns them off at launch.
+  const [showSamples, setShowSamples] = useState(true)
+  const bakeries = useMemo(() => [...liveShops, ...(showSamples ? SHOPS.map((shop) => ({ ...shop, sample: true })) : [])], [liveShops, showSamples])
   const [sbUser, setSbUser] = useState(null)
   const [myOrders, setMyOrders] = useState([])
   const [details, setDetails] = useState(readDetails)
@@ -525,6 +579,9 @@ export default function CustomerApp({ ctx }) {
     supabase.auth.getSession().then(({ data }) => setSbUser(data.session?.user || null))
     const { data: listener } = supabase.auth.onAuthStateChange((event, session) => { if (event !== 'TOKEN_REFRESHED') setSbUser(session?.user || null) })
     supabase.from('bakeries').select('*').eq('active', true).then(({ data }) => setLiveShops((data || []).map(liveShopFromRow)))
+    supabase.from('app_settings').select('value').eq('key', 'show_sample_shops').maybeSingle().then(({ data }) => {
+      if (data && (data.value === false || data.value === 'false')) setShowSamples(false)
+    })
     return () => listener.subscription.unsubscribe()
   }, [])
 
@@ -692,17 +749,38 @@ export default function CustomerApp({ ctx }) {
   }
 
   function renderBakeryCard(item) {
+    const ready = shopEarliest(item)
+    const from = customFromPrice(item)
     return (
       <button key={item.id} type="button" className="ca-store-card" onClick={() => openBakery(item.id)}>
-        <Photo tint={item.tint} icon={item.icon} size={44} className="ca-store-photo" />
+        <span className="ca-store-cover">
+          <CakeArt seed={item.id} className="ca-store-photo" />
+          {item.sample ? <span className="ca-cover-tag">Preview</span> : item.live ? <span className="ca-cover-tag is-new">New</span> : null}
+        </span>
         <span className="ca-store-row">
           <span className="ca-store-text">
             <span className="ca-store-name">{item.name}</span>
             <span className="ca-muted">{item.area} · {item.tagline}</span>
-            {item.live ? <span className="ca-chips"><span className="ca-chip is-accent">New</span></span> : null}
+            <span className="ca-store-facts">
+              {from ? <span>From {money(from)}</span> : null}
+              {ready ? <span>Ready {dateLabel(ready)}</span> : null}
+            </span>
           </span>
         </span>
       </button>
+    )
+  }
+
+  function renderHowItWorks() {
+    if (signedIn && myOrders.length) return null
+    return (
+      <div className="ca-pad ca-section">
+        <ol className="ca-how-strip" aria-label="How it works">
+          <li><span>1</span>Pick a bakery</li>
+          <li><span>2</span>Design your cake</li>
+          <li><span>3</span>Pick the day</li>
+        </ol>
+      </div>
     )
   }
 
@@ -713,8 +791,8 @@ export default function CustomerApp({ ctx }) {
         <div className="ca-pad ca-stack-14">
           <div className="ca-home-head">
             <div>
-              <span className="ca-muted ca-small">Order ahead from</span>
-              <span className="ca-home-place">Bakeries in Metro Vancouver</span>
+              <span className="ca-muted ca-small">{BRAND.tagline}</span>
+              <span className="ca-home-place">{BRAND.region}</span>
             </div>
             <button type="button" className="ca-round-btn" aria-label={`Cart, ${cartCount} items`} onClick={() => go('checkout')}>
               <Icon name="cart" size={20} />
@@ -726,15 +804,36 @@ export default function CustomerApp({ ctx }) {
             <Icon name="search" size={18} /><span>Search cakes, cupcakes, bakeries</span>
           </button>
         </div>
+        {renderHowItWorks()}
         {renderOccasionCard()}
         <div className="ca-cats" role="tablist" aria-label="Shop type">
           {CATEGORIES.map((item) => (
             <button key={item.id} type="button" role="tab" aria-selected={category === item.id} className={`ca-cat ${category === item.id ? 'is-active' : ''}`} onClick={() => setCategory(item.id)}>{item.label}</button>
           ))}
         </div>
+        {category === 'all' && bakeries.length > 3 ? (
+          <div className="ca-section">
+            <div className="ca-pad ca-row-between"><h2 className="ca-h2 ca-mb-0">Ready soonest</h2></div>
+            <div className="ca-carousel">
+              {[...bakeries].sort((a, b) => String(shopEarliest(a) || '9').localeCompare(String(shopEarliest(b) || '9'))).slice(0, 8).map((item) => (
+                <button key={item.id} type="button" className="ca-mini-card" onClick={() => openBakery(item.id)}>
+                  <span className="ca-store-cover"><CakeArt seed={item.id} className="ca-mini-photo" />{item.sample ? <span className="ca-cover-tag">Preview</span> : null}</span>
+                  <span className="ca-mini-name">{item.name}</span>
+                  <span className="ca-mini-meta">Ready {shopEarliest(item) ? dateLabel(shopEarliest(item)) : 'soon'}{customFromPrice(item) ? ` · from ${money(customFromPrice(item))}` : ''}</span>
+                </button>
+              ))}
+            </div>
+          </div>
+        ) : null}
         <div className="ca-pad ca-section">
-          <h2 className="ca-h2">{category === 'all' ? `${bakeries.length} bakeries near you` : `${CATEGORIES.find((item) => item.id === category)?.label} · ${shown.length}`}</h2>
-          <div className="ca-stack-18">{shown.map(renderBakeryCard)}</div>
+          <h2 className="ca-h2">{category === 'all' ? `All bakeries · ${bakeries.length}` : `${CATEGORIES.find((item) => item.id === category)?.label} · ${shown.length}`}</h2>
+          {!shown.length ? (
+            <div className="ca-empty-block">
+              <strong>{bakeries.length ? 'No bakeries of this type yet' : 'Bakeries are joining now'}</strong>
+              <span className="ca-muted">{bakeries.length ? 'Try another category.' : 'We’re signing up local bakers. Check back soon, or save your important dates so we can remind you.'}</span>
+            </div>
+          ) : null}
+          <div className="ca-stack-14">{shown.map(renderBakeryCard)}</div>
         </div>
       </div>
     )
@@ -851,7 +950,7 @@ export default function CustomerApp({ ctx }) {
     return (
       <div className="ca-screen">
         <div className="ca-banner">
-          <Photo tint={bakery.tint} icon={bakery.icon} size={48} className="ca-banner-photo" />
+          <CakeArt seed={bakery.id} className="ca-banner-photo" />
           <button type="button" className="ca-float-btn ca-float-left" aria-label="Back" onClick={() => go('home')}><Icon name="back" size={20} /></button>
         </div>
         <div className="ca-pad ca-stack-12 ca-pt-16">
@@ -859,7 +958,8 @@ export default function CustomerApp({ ctx }) {
             <h1 className="ca-h1">{bakery.name}</h1>
             <span className="ca-muted">{bakery.tagline}</span>
           </div>
-          <button type="button" className="ca-btn ca-btn-ghost" onClick={() => openChat(bakery, 'bakery')}><Icon name="chat" size={18} />Message {bakery.name}</button>
+          {bakery.sample ? <div className="ca-preview-note"><strong>Preview bakery.</strong> This sample shows how ordering works. You can design a cake, but you can’t order from it.</div> : null}
+          {bakery.sample ? null : <button type="button" className="ca-btn ca-btn-ghost" onClick={() => openChat(bakery, 'bakery')}><Icon name="chat" size={18} />Message {bakery.name}</button>}
           {renderLocationPicker(bakery)}
         </div>
         <div className="ca-pad ca-section">
@@ -1015,12 +1115,12 @@ export default function CustomerApp({ ctx }) {
         <div className="ca-pad ca-stack-8 ca-pt-16">
           <h1 className="ca-h1">{builderTitle(bakery)}</h1>
           <span className="ca-price-lg">From {money(customFromPrice(bakery))}</span>
-          <p className="ca-muted ca-lh">Choose everything: shape, sponge, layers, fillings and toppings. {bakery.name} bakes it fresh for your pickup time.</p>
+          <p className="ca-muted ca-lh">Choose everything: shape, sponge, layers, fillings and toppings. {bakery.name} bakes it fresh for the day you choose.</p>
         </div>
 
         <div className="ca-pad ca-pb-24">
           <Section title="Shape" note="Required">
-            <div className="ca-grid-2">
+            <div className="ca-grid-3 ca-shape-grid">
               {shapes.map((shape) => (
                 <button key={shape.id} type="button" aria-pressed={build.shape === shape.id} className={`ca-tile ${build.shape === shape.id ? 'is-selected' : ''}`} onClick={() => set({ shape: shape.id })}>
                   <ShapeIcon id={shape.id} />
@@ -1337,7 +1437,7 @@ export default function CustomerApp({ ctx }) {
     const sum = (key) => Math.round(groups.reduce((acc, group) => acc + group[key], 0) * 100) / 100
     const many = groups.length > 1
     const timesMissing = groups.some((group) => !group.date || !group.time)
-    const blocker = !signedIn ? '' : timesMissing ? 'Pick an available date for every item' : delivery && !address.line1 ? 'Add a delivery address' : !phone ? 'Add a phone number' : phoneProblem(phone) ? 'Enter a 10-digit phone number' : !checkout.phoneOk ? 'Confirm your phone number: tap “Text me a code”' : card.last4.length !== 4 ? 'Add a card' : ''
+    const blocker = cartShop?.sample ? 'This is a preview bakery, so it can’t take orders. Pick a real bakery to order.' : !signedIn ? '' : timesMissing ? 'Pick an available date for every item' : delivery && !address.line1 ? 'Add a delivery address' : !phone ? 'Add a phone number' : phoneProblem(phone) ? 'Enter a 10-digit phone number' : !checkout.phoneOk ? 'Confirm your phone number: tap “Text me a code”' : card.last4.length !== 4 ? 'Add a card' : ''
 
     function setItemDate(itemId, date) {
       setCart(cart.map((item) => (item.id === itemId ? { ...item, date } : item)))
@@ -1408,6 +1508,7 @@ export default function CustomerApp({ ctx }) {
 
     let cta
     if (!signedIn) cta = <button type="button" className="ca-btn" onClick={ctx.openCustomerSignIn}>Sign in to checkout</button>
+    else if (cartShop?.sample) cta = <button type="button" className="ca-btn" disabled>Preview bakery: ordering not available</button>
     else cta = <button type="button" className="ca-btn" disabled={checkout.placing} onClick={placeOrder}>{checkout.placing ? 'Placing order…' : `Place ${many ? `${groups.length} orders` : 'order'} · ${money(sum('total'))}`}</button>
 
     return (
@@ -1460,8 +1561,8 @@ export default function CustomerApp({ ctx }) {
                 </div>
               )
             })}
-            <input className="ca-input" aria-label="Note for the bakery" placeholder="Note for the bakery (allergies, colours…) (optional)" value={checkout.notes} onChange={(event) => setC({ notes: event.target.value })} />
-            <button type="button" className="ca-btn ca-btn-ghost" onClick={() => openChat(shop, 'checkout')}><Icon name="chat" size={18} />Ask {shop.name} a question</button>
+            <input className="ca-input" aria-label="Note for the bakery" placeholder="Note for the bakery: allergies, colours… (optional)" value={checkout.notes} onChange={(event) => setC({ notes: event.target.value })} />
+            {shop.sample ? <div className="ca-preview-note">This is a preview bakery, so it can’t take orders. Pick a real bakery to order.</div> : <button type="button" className="ca-btn ca-btn-ghost" onClick={() => openChat(shop, 'checkout')}><Icon name="chat" size={18} />Ask {shop.name} a question</button>}
           </section>
 
           <section className="ca-stack-10">
@@ -1600,6 +1701,32 @@ export default function CustomerApp({ ctx }) {
     )
   }
 
+  function renderOrderCard(order) {
+    const steps = order.fulfillment === 'delivery' ? DELIVERY_TRACK : PICKUP_TRACK
+    const at = steps.findIndex((step) => step.statuses.includes(order.status))
+    const first = (order.items || [])[0]
+    const more = (order.items || []).length - 1
+    const done = DONE_STATUSES.includes(order.status)
+    return (
+      <button key={order.id} type="button" className={`ca-order-card ${order.status === 'cancelled' ? 'is-cancelled' : ''}`} onClick={() => setOpenOrderId(order.id)}>
+        <span className="ca-order-top">
+          <CakeArt seed={order.bakery_id} className="ca-order-thumb" />
+          <span className="ca-order-text">
+            <strong>{order.bakery_name}</strong>
+            <span className="ca-muted ca-small">{first ? `${first.title}${more > 0 ? ` + ${more} more` : ''}` : 'Order'}</span>
+            <span className="ca-small">{order.fulfillment === 'delivery' ? 'Delivery' : 'Pickup'} · {order.ready_window} · {money(order.total)}</span>
+          </span>
+          <span className={`ca-status-chip is-${order.status}`}>{STATUS_TEXT[order.status] || order.status}</span>
+        </span>
+        {!done && at >= 0 ? (
+          <span className="ca-track" aria-label={`Step ${at + 1} of ${steps.length}: ${steps.at(at).label}`}>
+            {steps.map((step, index) => <span key={step.label} className={`ca-track-step ${index <= at ? 'is-on' : ''}`}><span className="ca-track-bar" /><span className="ca-track-label">{step.label}</span></span>)}
+          </span>
+        ) : null}
+      </button>
+    )
+  }
+
   function renderOrders() {
     if (openOrderId) {
       const order = myOrders.find((item) => item.id === openOrderId)
@@ -1632,16 +1759,22 @@ export default function CustomerApp({ ctx }) {
               <strong>Sign in to see your orders</strong>
               <button type="button" className="ca-btn ca-mt-12" onClick={ctx.openCustomerSignIn}>Sign in</button>
             </div>
-          ) : myOrders.length ? myOrders.map((order) => (
-            <button key={order.id} type="button" className="ca-list-row" onClick={() => setOpenOrderId(order.id)}>
-              <span className="ca-list-icon"><Icon name={order.fulfillment === 'delivery' ? 'pin' : 'cake'} /></span>
-              <span className="ca-list-text">
-                <strong>{order.bakery_name}</strong>
-                <span className="ca-muted">{STATUS_TEXT[order.status] || order.status} · {order.ready_window} · {money(order.total)}</span>
-              </span>
-              <Icon name="chevron" size={18} />
-            </button>
-          )) : <p className="ca-muted">No orders yet. Your first cake will show up here.</p>}
+          ) : myOrders.length ? (
+            <>
+              {[['Upcoming', myOrders.filter((order) => !DONE_STATUSES.includes(order.status))], ['Past', myOrders.filter((order) => DONE_STATUSES.includes(order.status))]].map(([label, list]) => (list.length ? (
+                <div key={label} className="ca-stack-10">
+                  <h2 className="ca-h2">{label}</h2>
+                  {list.map(renderOrderCard)}
+                </div>
+              ) : null))}
+            </>
+          ) : (
+            <div className="ca-empty-block">
+              <strong>No orders yet</strong>
+              <span className="ca-muted">Pick a bakery and design your first cake. It will show up here.</span>
+              <button type="button" className="ca-btn ca-mt-12" onClick={() => go('home')}>Find a bakery</button>
+            </div>
+          )}
         </div>
       </div>
     )
