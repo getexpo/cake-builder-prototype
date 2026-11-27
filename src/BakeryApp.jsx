@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { CATEGORIES, SHOPS } from './catalog.js'
 import { friendlyError, supabase, uploadDocument } from './supabaseClient.js'
+import { orderPhotoUrls, removeShopPhoto, shopPhotoUrl, uploadShopPhoto } from './photos.js'
 import { Badge, Check, Field, FileField, LocationsEditor, Loading, Notice, Shell, SignInScreen, WorkEligibility, signInWithGoogle, signOut, eligibilityDocs, eligibilityMissing, locationsProblem, money, useAccountGate, useSession, when } from './partnerShared.jsx'
 import { newLocation, shopLocations, withCoordinates } from './geo.js'
 import { DEFAULT_TIMES, NOTICE_OPTIONS, WEEKDAYS, dateLabel, vanDate, weekday } from './schedule.js'
@@ -227,6 +228,125 @@ function AccountMenu({ items, currentId, currentLabel, onChoose, onAdd }) {
           </button>
         </div>
       ) : null}
+    </div>
+  )
+}
+
+/* ---------- Photos: cover + gallery customers see ---------- */
+
+// The customer's "make it look like this" pictures on an order (private links, valid for an hour).
+function ReferencePhotos({ paths }) {
+  const [urls, setUrls] = useState([])
+  useEffect(() => { let on = true; orderPhotoUrls(paths).then((list) => { if (on) setUrls(list) }); return () => { on = false } }, [paths])
+  if (!urls.length) return null
+  return (
+    <span className="pt-ref-row" aria-label="Customer's reference photos">
+      {urls.map((url) => <a key={url} href={url} target="_blank" rel="noopener noreferrer"><img src={url} alt="Customer's reference photo" /></a>)}
+    </span>
+  )
+}
+
+const GALLERY_MAX = 12
+
+function PhotosTab({ bakery, onSaved }) {
+  const [cover, setCover] = useState(bakery.cover_photo || '')
+  const [gallery, setGallery] = useState(Array.isArray(bakery.gallery) ? bakery.gallery : [])
+  const [busy, setBusy] = useState('')
+  const [error, setError] = useState('')
+  const [saved, setSaved] = useState('')
+
+  async function persist(patch, note) {
+    const { error: err } = await supabase.from('bakeries').update(patch).eq('id', bakery.id)
+    if (err) throw err
+    setSaved(note)
+    onSaved?.()
+  }
+
+  async function addCover(file) {
+    if (!file) return
+    setBusy('cover'); setError(''); setSaved('')
+    try {
+      const path = await uploadShopPhoto(bakery.id, file)
+      const old = cover
+      await persist({ cover_photo: path }, 'Cover photo updated.')
+      setCover(path)
+      if (old && !gallery.some((item) => item.path === old)) removeShopPhoto(old)
+    } catch (err) { setError(friendlyError(err)) }
+    setBusy('')
+  }
+
+  async function addToGallery(files) {
+    const list = Array.from(files || []).slice(0, GALLERY_MAX - gallery.length)
+    if (!list.length) { if (files?.length) setError(`You can show up to ${GALLERY_MAX} photos. Remove one to add another.`); return }
+    setBusy('gallery'); setError(''); setSaved('')
+    try {
+      const added = []
+      for (const file of list) added.push({ path: await uploadShopPhoto(bakery.id, file), addedAt: new Date().toISOString() })
+      const next = [...gallery, ...added]
+      await persist({ gallery: next, ...(cover ? {} : { cover_photo: added[0].path }) }, `${added.length} photo${added.length === 1 ? '' : 's'} added.`)
+      setGallery(next)
+      if (!cover) setCover(added[0].path)
+    } catch (err) { setError(friendlyError(err)) }
+    setBusy('')
+  }
+
+  async function removePhoto(path) {
+    setBusy(path); setError(''); setSaved('')
+    try {
+      const next = gallery.filter((item) => item.path !== path)
+      const nextCover = cover === path ? next[0]?.path || '' : cover
+      await persist({ gallery: next, cover_photo: nextCover || null }, 'Photo removed.')
+      setGallery(next); setCover(nextCover)
+      removeShopPhoto(path)
+    } catch (err) { setError(friendlyError(err)) }
+    setBusy('')
+  }
+
+  async function makeCover(path) {
+    setBusy(path); setError(''); setSaved('')
+    try { await persist({ cover_photo: path }, 'Cover photo updated.'); setCover(path) } catch (err) { setError(friendlyError(err)) }
+    setBusy('')
+  }
+
+  return (
+    <div className="pt-stack">
+      <section className="pt-card pt-stack">
+        <div className="pt-row"><h2 className="pt-h2">Cover photo</h2>{cover ? <span className="pt-flag is-good">Showing to customers</span> : <span className="pt-flag is-warn">No photo yet</span>}</div>
+        <p className="pt-muted">The first thing customers see on your shop card. Use your best cake, in daylight, filling the frame.</p>
+        <div className="pt-cover-preview">
+          {cover ? <img src={shopPhotoUrl(cover)} alt={`${bakery.name} cover`} /> : <span className="pt-muted">No cover photo</span>}
+        </div>
+        <label className={`pt-btn ${cover ? 'is-ghost' : ''} pt-file-btn`}>
+          {busy === 'cover' ? 'Uploading…' : cover ? 'Replace cover photo' : 'Upload cover photo'}
+          <input type="file" accept="image/*" disabled={Boolean(busy)} onChange={(e) => { addCover(e.target.files?.[0]); e.target.value = '' }} />
+        </label>
+      </section>
+      <section className="pt-card pt-stack">
+        <div className="pt-row"><h2 className="pt-h2">Cakes you’ve made</h2><span className="pt-muted pt-small">{gallery.length} of {GALLERY_MAX}</span></div>
+        <p className="pt-muted">Customers scroll through these on your shop page. Real photos of your own cakes get far more orders than anything else.</p>
+        {gallery.length ? (
+          <ul className="pt-gallery">
+            {gallery.map((item) => (
+              <li key={item.path}>
+                <img src={shopPhotoUrl(item.path)} alt="Cake from your gallery" loading="lazy" />
+                {cover === item.path ? <span className="pt-gallery-tag">Cover</span> : null}
+                <span className="pt-gallery-actions">
+                  {cover !== item.path ? <button type="button" className="pt-btn is-ghost is-small" disabled={Boolean(busy)} onClick={() => makeCover(item.path)}>Make cover</button> : null}
+                  <button type="button" className="pt-btn is-ghost is-small" disabled={Boolean(busy)} onClick={() => removePhoto(item.path)}>Remove</button>
+                </span>
+              </li>
+            ))}
+          </ul>
+        ) : <p className="pt-muted pt-small">No photos yet.</p>}
+        {gallery.length < GALLERY_MAX ? (
+          <label className="pt-btn pt-file-btn">
+            {busy === 'gallery' ? 'Uploading…' : 'Add photos'}
+            <input type="file" accept="image/*" multiple disabled={Boolean(busy)} onChange={(e) => { addToGallery(e.target.files); e.target.value = '' }} />
+          </label>
+        ) : null}
+      </section>
+      {error ? <Notice kind="error">{error}</Notice> : null}
+      {saved ? <Notice kind="ok">{saved}</Notice> : null}
     </div>
   )
 }
@@ -560,6 +680,7 @@ function BakeryDashboard({ user, bakery, application, onSaved, headerExtra, role
     { id: 'calendar', label: 'Calendar' },
     { id: 'messages', label: 'Messages', count: unread },
     { id: 'menu', label: 'Menu' },
+    { id: 'photos', label: 'Photos' },
     { id: 'shop', label: 'Shop settings' },
     ...(isOwner ? [{ id: 'payouts', label: 'Payouts' }, { id: 'team', label: 'Team' }] : []),
   ]
@@ -574,6 +695,7 @@ function BakeryDashboard({ user, bakery, application, onSaved, headerExtra, role
       ) : null}
       {!bakery.active && tab !== 'setup' ? <Notice>{isOwner ? <>Your shop isn’t live yet. <button type="button" className="pt-link-btn" onClick={() => setTab('setup')}>See what’s left</button></> : 'This shop isn’t live yet. The owner can publish it.'}</Notice> : null}
       {tab === 'team' && isOwner ? <TeamTab bakery={bakery} user={user} /> : null}
+      {tab === 'photos' ? <PhotosTab bakery={bakery} onSaved={onSaved} /> : null}
       {tab === 'setup' ? (
         <SetupChecklist
           approvedAt={application?.reviewed_at}
@@ -602,7 +724,7 @@ function BakeryDashboard({ user, bakery, application, onSaved, headerExtra, role
                       <div className="pt-row"><strong>#{order.id.slice(0, 6).toUpperCase()} · {order.customer_name || 'Customer'}</strong><Badge status={order.status} /></div>
                       <span className="pt-small">{order.fulfillment === 'delivery' ? '🚗 Delivery' : '🛍️ Pickup'} · {order.ready_window || when(order.ready_at)}</span>
                       <div className="pt-items">
-                        {(order.items || []).map((item, index) => <div key={index}><strong>{item.quantity || 1}× {item.title}</strong><span className="pt-muted pt-small">{item.summary}</span></div>)}
+                        {(order.items || []).map((item, index) => <div key={index}><strong>{item.quantity || 1}× {item.title}</strong><span className="pt-muted pt-small">{item.summary}</span>{item.photos?.length ? <ReferencePhotos paths={item.photos} /> : null}</div>)}
                       </div>
                       {order.notes ? <Notice>{order.notes}</Notice> : null}
                       <div className="pt-row"><span className="pt-muted pt-small">Food total</span><strong>{money(order.subtotal)}</strong></div>

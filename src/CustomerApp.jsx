@@ -9,6 +9,7 @@ import { distanceKm, geocode, kmLabel, shopLocations } from './geo.js'
 import { OccasionsScreen, dismissPrompt, promptDismissed, upcoming, useOccasions } from './Occasions.jsx'
 import { countdown, occasionTitle } from './occasions.js'
 import { BRAND } from './brand.js'
+import { orderPhotoUrls, shopPhotoUrl, uploadOrderPhoto } from './photos.js'
 import './customer.css'
 
 // Customer-facing app (redesign). All data and actions come from App via `ctx`,
@@ -138,6 +139,7 @@ function liveShopFromRow(row) {
     locations: row.locations || [], closedDays: row.closed_days || [], blockedDates: row.blocked_dates || [], dailyCapacity: row.daily_capacity || null, pickupTimes: row.pickup_times || null,
     builder: row.builder && Object.keys(row.builder).length ? row.builder : SHOPS[0].builder,
     menu: (row.menu || []).map((item) => ({ ...item, price: Number(item.price) || 0, leadHours: Number(item.leadHours) || 0 })), live: true,
+    coverPhoto: shopPhotoUrl(row.cover_photo), gallery: (Array.isArray(row.gallery) ? row.gallery : []).map((item) => shopPhotoUrl(item.path)).filter(Boolean),
   }
 }
 
@@ -417,6 +419,20 @@ function CakeArt({ seed, className = '' }) {
   )
 }
 
+// A bakery's real cover photo when it has one, otherwise the drawn cake.
+function ShopCover({ shop, className = '' }) {
+  if (shop?.coverPhoto) return <div className={`ca-photo-cover ${className}`}><img src={shop.coverPhoto} alt="" loading="lazy" /></div>
+  return <CakeArt seed={shop?.id || 'cake'} className={className} />
+}
+
+// Reference photos on an order item: loads short-lived private links.
+function OrderPhotos({ paths }) {
+  const [urls, setUrls] = useState([])
+  useEffect(() => { let on = true; orderPhotoUrls(paths).then((list) => { if (on) setUrls(list) }); return () => { on = false } }, [paths])
+  if (!urls.length) return null
+  return <span className="ca-ref-row">{urls.map((url) => <a key={url} href={url} target="_blank" rel="noopener noreferrer"><img src={url} alt="Reference photo" /></a>)}</span>
+}
+
 function TopBar({ title, onBack, right }) {
   return (
     <header className="ca-topbar">
@@ -496,6 +512,9 @@ export default function CustomerApp({ ctx }) {
   const [showSamples, setShowSamples] = useState(true)
   const bakeries = useMemo(() => [...liveShops, ...(showSamples ? SHOPS.map((shop) => ({ ...shop, sample: true })) : [])], [liveShops, showSamples])
   const [sbUser, setSbUser] = useState(null)
+  const [photoBusy, setPhotoBusy] = useState(false)
+  const [photoError, setPhotoError] = useState('')
+  const [lightbox, setLightbox] = useState(null)
   const [myOrders, setMyOrders] = useState([])
   const [details, setDetails] = useState(readDetails)
   const [origin, setOrigin] = useState(null) // { lat, lng, label }
@@ -754,7 +773,7 @@ export default function CustomerApp({ ctx }) {
     return (
       <button key={item.id} type="button" className="ca-store-card" onClick={() => openBakery(item.id)}>
         <span className="ca-store-cover">
-          <CakeArt seed={item.id} className="ca-store-photo" />
+          <ShopCover shop={item} className="ca-store-photo" />
           {item.sample ? <span className="ca-cover-tag">Preview</span> : item.live ? <span className="ca-cover-tag is-new">New</span> : null}
         </span>
         <span className="ca-store-row">
@@ -817,7 +836,7 @@ export default function CustomerApp({ ctx }) {
             <div className="ca-carousel">
               {[...bakeries].sort((a, b) => String(shopEarliest(a) || '9').localeCompare(String(shopEarliest(b) || '9'))).slice(0, 8).map((item) => (
                 <button key={item.id} type="button" className="ca-mini-card" onClick={() => openBakery(item.id)}>
-                  <span className="ca-store-cover"><CakeArt seed={item.id} className="ca-mini-photo" />{item.sample ? <span className="ca-cover-tag">Preview</span> : null}</span>
+                  <span className="ca-store-cover"><ShopCover shop={item} className="ca-mini-photo" />{item.sample ? <span className="ca-cover-tag">Preview</span> : null}</span>
                   <span className="ca-mini-name">{item.name}</span>
                   <span className="ca-mini-meta">Ready {shopEarliest(item) ? dateLabel(shopEarliest(item)) : 'soon'}{customFromPrice(item) ? ` · from ${money(customFromPrice(item))}` : ''}</span>
                 </button>
@@ -950,7 +969,7 @@ export default function CustomerApp({ ctx }) {
     return (
       <div className="ca-screen">
         <div className="ca-banner">
-          <CakeArt seed={bakery.id} className="ca-banner-photo" />
+          <ShopCover shop={bakery} className="ca-banner-photo" />
           <button type="button" className="ca-float-btn ca-float-left" aria-label="Back" onClick={() => go('home')}><Icon name="back" size={20} /></button>
         </div>
         <div className="ca-pad ca-stack-12 ca-pt-16">
@@ -958,6 +977,14 @@ export default function CustomerApp({ ctx }) {
             <h1 className="ca-h1">{bakery.name}</h1>
             <span className="ca-muted">{bakery.tagline}</span>
           </div>
+          {bakery.gallery?.length ? (
+            <div className="ca-gallery-block">
+              <h2 className="ca-h3">Cakes from {bakery.name}</h2>
+              <div className="ca-gallery">
+                {bakery.gallery.map((url, index) => <button key={url} type="button" className="ca-gallery-item" aria-label={`Photo ${index + 1} of ${bakery.gallery.length}`} onClick={() => setLightbox({ list: bakery.gallery, index })}><img src={url} alt="" loading="lazy" /></button>)}
+              </div>
+            </div>
+          ) : null}
           {bakery.sample ? <div className="ca-preview-note"><strong>Preview bakery.</strong> This sample shows how ordering works. You can design a cake, but you can’t order from it.</div> : null}
           {bakery.sample ? null : <button type="button" className="ca-btn ca-btn-ghost" onClick={() => openChat(bakery, 'bakery')}><Icon name="chat" size={18} />Message {bakery.name}</button>}
           {renderLocationPicker(bakery)}
@@ -1083,9 +1110,11 @@ export default function CustomerApp({ ctx }) {
         totalPrice: price,
         shopId: bakery.id,
         savedDesignId: null,
+        photos: (build.photos || []).map((photo) => photo.path),
         config: {
           occasion: 'Custom',
           summary,
+          photos: (build.photos || []).map((photo) => photo.path),
           mode: limit > 4 ? 'advanced' : 'simple',
           cakeType: build.shape,
           layerCount: build.layerCount,
@@ -1241,6 +1270,36 @@ export default function CustomerApp({ ctx }) {
               })}
             </div>
           </Section> : null}
+
+          <Section title="Photos of the cake you want" note="Optional">
+            <p className="ca-muted ca-small ca-mb-8">Add up to 3 pictures so {bakery.name} can see the look you’re after.</p>
+            <div className="ca-ref-row is-edit">
+              {(build.photos || []).map((photo) => (
+                <span key={photo.path} className="ca-ref-thumb">
+                  <img src={photo.preview} alt="Your reference" />
+                  <button type="button" aria-label="Remove photo" onClick={() => set({ photos: (build.photos || []).filter((item) => item.path !== photo.path) })}>×</button>
+                </span>
+              ))}
+              {(build.photos || []).length < 3 ? (
+                signedIn ? (
+                  <label className="ca-ref-add">
+                    {photoBusy ? '…' : '+'}<span>{photoBusy ? 'Uploading' : 'Add photo'}</span>
+                    <input type="file" accept="image/*" disabled={photoBusy} onChange={async (event) => {
+                      const file = event.target.files?.[0]; event.target.value = ''
+                      if (!file) return
+                      setPhotoBusy(true); setPhotoError('')
+                      try {
+                        const path = await uploadOrderPhoto(sbUser.id, file)
+                        setBuild((current) => ({ ...current, photos: [...(current.photos || []), { path, preview: URL.createObjectURL(file) }].slice(0, 3) }))
+                      } catch (err) { setPhotoError(err.message || 'Couldn’t upload that photo.') }
+                      setPhotoBusy(false)
+                    }} />
+                  </label>
+                ) : <button type="button" className="ca-ref-add" onClick={ctx.openCustomerSignIn}>+<span>Sign in to add</span></button>
+              ) : null}
+            </div>
+            {photoError ? <p className="ca-error ca-small">{photoError}</p> : null}
+          </Section>
 
           <Section title="Message on top" note="Optional">
             <input id="ca-build-msg" aria-label="Message on top" className="ca-input" maxLength={40} placeholder="e.g. Happy 30th, Maya!" value={build.message} onChange={(event) => set({ message: event.target.value })} />
@@ -1456,6 +1515,7 @@ export default function CustomerApp({ ctx }) {
           unitPrice: item.unitPrice ?? item.totalPrice,
           totalPrice: (item.unitPrice ?? item.totalPrice) * (item.quantity || 1),
           config: item.config || null,
+          photos: item.photos || item.config?.photos || [],
         }))
         const row = {
           customer_id: sbUser.id,
@@ -1685,7 +1745,7 @@ export default function CustomerApp({ ctx }) {
             </ol>
           ) : null}
           <div className="ca-summary">
-            {(order.items || []).map((item, index) => <span key={index}><strong>{item.quantity || 1}× {item.title}</strong>{item.summary ? ` · ${item.summary}` : ''}</span>)}
+            {(order.items || []).map((item, index) => <span key={index}><strong>{item.quantity || 1}× {item.title}</strong>{item.summary ? ` · ${item.summary}` : ''}{item.photos?.length ? <OrderPhotos paths={item.photos} /> : null}</span>)}
             <strong>Total {money(order.total)}</strong>
             {order.fulfillment === 'delivery' && order.dropoff ? <span className="ca-muted">To {order.dropoff.line1}, {order.dropoff.city}</span> : null}
             {order.fulfillment === 'pickup' ? <span className="ca-muted">Pick up at {[order.bakery_address, order.bakery_area].filter(Boolean).join(', ')}</span> : null}
@@ -1710,7 +1770,7 @@ export default function CustomerApp({ ctx }) {
     return (
       <button key={order.id} type="button" className={`ca-order-card ${order.status === 'cancelled' ? 'is-cancelled' : ''}`} onClick={() => setOpenOrderId(order.id)}>
         <span className="ca-order-top">
-          <CakeArt seed={order.bakery_id} className="ca-order-thumb" />
+          <ShopCover shop={bakeries.find((shop) => shop.id === order.bakery_id) || { id: order.bakery_id }} className="ca-order-thumb" />
           <span className="ca-order-text">
             <strong>{order.bakery_name}</strong>
             <span className="ca-muted ca-small">{first ? `${first.title}${more > 0 ? ` + ${more} more` : ''}` : 'Order'}</span>
@@ -2004,6 +2064,17 @@ export default function CustomerApp({ ctx }) {
         {signedIn && ['home', 'orders', 'account'].includes(view) ? <NotificationPrompt variant="ca" storageKey="notify-prompt-customer" text="Get notified when your order is confirmed, ready or on its way." /> : null}
         {screen}
         {showNav ? <BottomNav view={view} go={go} cartCount={cartCount} unread={unreadMessages} /> : null}
+        {lightbox ? (
+          <div className="ca-lightbox" role="dialog" aria-modal="true" aria-label="Cake photos" onClick={() => setLightbox(null)}>
+            <img src={lightbox.list.at(lightbox.index)} alt={`Photo ${lightbox.index + 1} of ${lightbox.list.length}`} onClick={(event) => event.stopPropagation()} />
+            <div className="ca-lightbox-bar" onClick={(event) => event.stopPropagation()}>
+              <button type="button" aria-label="Previous photo" disabled={lightbox.index === 0} onClick={() => setLightbox({ ...lightbox, index: lightbox.index - 1 })}>‹</button>
+              <span>{lightbox.index + 1} / {lightbox.list.length}</span>
+              <button type="button" aria-label="Next photo" disabled={lightbox.index >= lightbox.list.length - 1} onClick={() => setLightbox({ ...lightbox, index: lightbox.index + 1 })}>›</button>
+              <button type="button" aria-label="Close" onClick={() => setLightbox(null)}>×</button>
+            </div>
+          </div>
+        ) : null}
         {tipPromptOrder && !pendingItem && !(view === 'orders' && openOrderId === tipPromptOrder.id) ? (
           <div className="ca-modal-backdrop" role="dialog" aria-modal="true" aria-labelledby="ca-tip-title">
             <div className="ca-modal">

@@ -385,3 +385,26 @@
 .ca-carousel { scroll-padding-left: 20px; scroll-padding-right: 20px; }
 .ca-banner.is-tall .ca-banner-photo { height: 170px; }
 .ca-stack-view.is-banner { height: 170px; padding-bottom: 14px; }
+
+/* Photos */
+.ca-photo-cover { overflow: hidden; background: #F5F5F4; }
+.ca-photo-cover img { width: 100%; height: 100%; object-fit: cover; display: block; }
+.ca-gallery-block { display: flex; flex-direction: column; gap: 8px; }
+.ca-gallery { display: flex; gap: 8px; overflow-x: auto; scrollbar-width: none; margin: 0 -20px; padding: 0 20px 2px; }
+.ca-gallery::-webkit-scrollbar { display: none; }
+.ca-gallery-item { flex: none; width: 112px; height: 112px; padding: 0; border: 0; border-radius: 12px; overflow: hidden; background: #F5F5F4; cursor: zoom-in; }
+.ca-gallery-item img { width: 100%; height: 100%; object-fit: cover; display: block; }
+.ca-lightbox { position: fixed; inset: 0; z-index: 60; background: rgba(12, 10, 9, .92); display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 14px; padding: 16px; }
+.ca-lightbox img { max-width: 100%; max-height: 78vh; border-radius: 12px; object-fit: contain; }
+.ca-lightbox-bar { display: flex; align-items: center; gap: 14px; color: #FFFFFF; font-weight: 600; }
+.ca-lightbox-bar button { width: 44px; height: 44px; border-radius: 50%; border: 0; background: rgba(255,255,255,.16); color: #FFFFFF; font-size: 24px; line-height: 1; cursor: pointer; }
+.ca-lightbox-bar button:disabled { opacity: .35; }
+.ca-ref-row { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 6px; }
+.ca-ref-row img { width: 64px; height: 64px; object-fit: cover; border-radius: 10px; display: block; }
+.ca-ref-thumb { position: relative; }
+.ca-ref-thumb button { position: absolute; top: -6px; right: -6px; width: 24px; height: 24px; border-radius: 50%; border: 0; background: #1C1917; color: #FFFFFF; font-size: 15px; line-height: 1; cursor: pointer; }
+.ca-ref-add { position: relative; width: 64px; height: 64px; border: 1.5px dashed #A8A29E; border-radius: 10px; background: #FAFAF9; display: flex; flex-direction: column; align-items: center; justify-content: center; font-size: 20px; color: #57534E; overflow: hidden; cursor: pointer; padding: 0; }
+.ca-ref-add span { font-size: 10.5px; font-weight: 600; }
+.ca-ref-add input { position: absolute; inset: 0; opacity: 0; cursor: pointer; }
+.ca-mb-8 { margin: 0 0 8px; }
+.ca-error { color: #B91C1C; margin: 6px 0 0; }
