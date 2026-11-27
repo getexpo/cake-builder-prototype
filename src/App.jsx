@@ -7,7 +7,8 @@ const ENV_API_BASE_URL = import.meta.env.VITE_API_BASE_URL?.trim()
 const API_BASE_CANDIDATES = ENV_API_BASE_URL
   ? [ENV_API_BASE_URL]
   : ['http://localhost:4224', 'http://localhost:4222', 'http://localhost:4220', 'http://localhost:4218', 'http://localhost:4204', 'http://localhost:4202', 'http://localhost:4194', 'http://localhost:4192', 'http://localhost:4176', 'http://localhost:4174', 'http://localhost:4172', 'http://localhost:4170', 'http://localhost:4164', 'http://localhost:4160', 'http://localhost:4126', 'http://localhost:4124', 'http://localhost:4122', 'http://localhost:4120', 'http://localhost:4020']
-const HAS_REMOTE_API = Boolean(ENV_API_BASE_URL)
+// The old Render backend is retired: everything runs on Supabase now. Set VITE_USE_LEGACY_API=true only to bring it back.
+const HAS_REMOTE_API = Boolean(ENV_API_BASE_URL) && import.meta.env.VITE_USE_LEGACY_API === 'true'
 const API_ROUTE_PROBE = [
   { path: '/api/meta/order-statuses', allowedStatuses: [200] },
   { path: '/api/auth/me', allowedStatuses: [200, 401] },
